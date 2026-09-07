@@ -19,6 +19,7 @@
     "@dnd-kit/sortable": "^10.0.0",
     "@dnd-kit/utilities": "^3.2.2",
     "@tauri-apps/plugin-http": "^2.5.9",
+    "@types/three": "^0.185.4",
     "clsx": "^2.1.1",
     "framer-motion": "^12.43.0",
     "html2canvas": "^1.4.1",
@@ -28,6 +29,7 @@
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
     "react-router-dom": "^7.18.2",
+    "three": "^0.185.1",
     "zustand": "^5.0.14"
   },
   "devDependencies": {

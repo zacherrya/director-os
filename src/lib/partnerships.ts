@@ -273,18 +273,82 @@ export function formatActionDate(iso: string): string {
 
 export interface JourneyStep { id: string; label: string; stage: OpportunityStage; completedAt?: string }
 export interface Activity { id: string; at: string; channel: 'Email' | 'Instagram' | 'LinkedIn' | 'Notes'; text: string }
-export const ISLAND_AREAS: { name: string; hint: string; stages: OpportunityStage[] }[] = [
-  { name: 'Discovery Coast', hint: 'Find your next connection', stages: ['Discovery'] },
-  { name: 'Research Village', hint: 'Get to know the brand', stages: ['Research'] },
-  { name: 'Concept Studio', hint: 'Give the idea a shape', stages: ['Concept'] },
-  { name: 'Outreach Port', hint: 'Put your work out there', stages: ['Ready to pitch', 'Pitched'] },
-  { name: 'Conversation Bay', hint: 'Keep the conversation going', stages: ['Replied'] },
-  { name: 'Negotiation Bridge', hint: 'Find the right agreement', stages: ['Negotiating'] },
-  { name: 'Partnership City', hint: 'Make it official', stages: ['Agreed'] },
-  { name: 'Production District', hint: 'Bring the concept to life', stages: ['In production'] },
-  { name: 'Results Harbour', hint: 'Deliver, review, get paid', stages: ['Delivered', 'Paid'] },
-  { name: 'Relationship Garden', hint: 'Grow something lasting', stages: ['Relationship'] },
+
+/* --------------------------------------------------------------- destinations */
+
+/**
+ * The partnership world is a single winding route from first signal to a
+ * lasting relationship. Each stage has a place, and every open deal lives at
+ * one of them — the diorama and the table both read off this list.
+ *
+ * Coordinates are in three.js world units (x/z), matching the sculpted island.
+ */
+export interface Destination {
+  key: string
+  name: string
+  hint: string
+  x: number
+  z: number
+}
+
+export const DESTINATIONS: Destination[] = [
+  { key: 'radar', name: 'Brand Radar', hint: 'Signals worth watching', x: -38, z: 13 },
+  { key: 'research', name: 'Research House', hint: 'Get to know the brand', x: -30, z: -6 },
+  { key: 'idea', name: 'Idea Lab', hint: 'Shape the concept', x: -19, z: 12 },
+  { key: 'pitch', name: 'Pitch Workshop', hint: 'Assemble the pitch', x: -9, z: -8 },
+  { key: 'outreach', name: 'Outreach Terminal', hint: 'Sent, waiting', x: 1, z: 10 },
+  { key: 'control', name: 'Follow-up Control Room', hint: 'Chasing quiet threads', x: 10, z: -8 },
+  { key: 'response', name: 'Response Station', hint: 'They answered', x: 18, z: 10 },
+  { key: 'bridge', name: 'Negotiation Bridge', hint: 'Terms, fee, usage', x: 26, z: 0 },
+  { key: 'gate', name: 'Deal Gate', hint: 'Agreed, not shot', x: 33, z: -12 },
+  { key: 'studio', name: 'Production Studio', hint: 'Being made', x: 42, z: 4 },
+  { key: 'harbour', name: 'Delivery & Payment Harbour', hint: 'Delivered · waiting on payment', x: 49, z: -8 },
+  { key: 'garden', name: 'Relationship Garden', hint: 'Lasting partners', x: 55, z: 10 },
+  { key: 'archive', name: 'Archive', hint: 'Closed, kept on file', x: 33, z: -24 },
 ]
+
+/** One-to-one mapping from lifecycle stage to a world destination. */
+const STAGE_TO_DEST: Record<OpportunityStage, number> = {
+  Discovery: 0,
+  Research: 1,
+  Concept: 2,
+  'Ready to pitch': 3,
+  Pitched: 4,
+  Replied: 6,
+  Negotiating: 7,
+  Agreed: 8,
+  'In production': 9,
+  Delivered: 10,
+  Paid: 10,
+  Relationship: 11,
+}
+
+/**
+ * A pitched deal that has been sitting there for more than four business days
+ * belongs at the Follow-up Control Room, not still at the Outreach Terminal —
+ * the destination itself is a nudge.
+ */
+export function destinationIndex(o: Opportunity): number {
+  if (o.deletedAt) return 12
+  if (o.stage === 'Pitched') {
+    const daysSince = lastContactDaysAgo(o)
+    if (daysSince != null && daysSince >= 4) return 5
+  }
+  return STAGE_TO_DEST[o.stage]
+}
+
+export function destinationFor(o: Opportunity): Destination {
+  return DESTINATIONS[destinationIndex(o)]
+}
+
+/** Kept so any older code that still imports `ISLAND_AREAS` compiles. */
+export const ISLAND_AREAS: { name: string; hint: string; stages: OpportunityStage[] }[] = DESTINATIONS.slice(0, 12).map(
+  (d, i) => ({
+    name: d.name,
+    hint: d.hint,
+    stages: (Object.keys(STAGE_TO_DEST) as OpportunityStage[]).filter((s) => STAGE_TO_DEST[s] === i),
+  }),
+)
 export function localDate(offset = 0): string {
   const date = new Date(); date.setDate(date.getDate() + offset)
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
@@ -293,6 +357,74 @@ export function health(o: Opportunity): 'Healthy' | 'Needs attention' | 'Stalled
   if (o.stage === 'Paid' || (o.stage === 'Relationship' && !o.nextAction.trim())) return 'Healthy'
   if ((daysUntil(o.nextActionDate) ?? 0) < -7) return 'Stalled'
   return ['none', 'overdue', 'today'].includes(actionState(o)) ? 'Needs attention' : 'Healthy'
+}
+
+/**
+ * The design speaks in Moving well / Needs attention / Stalled / Waiting — the
+ * fourth state is what an unset deal on a signal-only stage looks like, which
+ * is genuinely different from a Healthy deal that has a real plan.
+ */
+export type WorldHealth = 'Moving well' | 'Needs attention' | 'Stalled' | 'Waiting'
+
+export function worldHealth(o: Opportunity): WorldHealth {
+  if (!o.nextAction.trim() && (o.stage === 'Discovery' || o.stage === 'Research' || o.stage === 'Relationship')) return 'Waiting'
+  const h = health(o)
+  if (h === 'Healthy') return 'Moving well'
+  return h
+}
+
+export const WORLD_HEALTH_COLOR: Record<WorldHealth, string> = {
+  'Moving well': '#5f7d69',
+  'Needs attention': '#c8a86b',
+  Stalled: '#a05f57',
+  Waiting: '#8d908b',
+}
+
+export function lastContactDaysAgo(o: Opportunity): number | null {
+  const last = lastContact(o)
+  if (!last) return null
+  const then = new Date(last).getTime()
+  if (Number.isNaN(then)) return null
+  return Math.round((Date.now() - then) / 86_400_000)
+}
+
+/** Where the money actually lands: `confirmed` for won deals, otherwise `fee`. */
+export function confirmedValue(o: Opportunity): string {
+  if (['Agreed', 'In production', 'Delivered', 'Paid', 'Relationship'].includes(o.stage)) {
+    return o.fee || '—'
+  }
+  return '—'
+}
+
+/** Won / Declined / Open — what closed the deal, in one word. */
+export function outcomeOf(o: Opportunity): 'Won' | 'Declined' | 'Open' {
+  if (['Agreed', 'In production', 'Delivered', 'Paid', 'Relationship'].includes(o.stage)) return 'Won'
+  return 'Open'
+}
+
+export const CHANNELS = ['Email', 'Instagram', 'LinkedIn'] as const
+export type Channel = (typeof CHANNELS)[number]
+
+export interface ChannelState {
+  channel: Channel
+  state: 'Not started' | 'Sent' | 'Replied' | 'Bounced' | 'Connected'
+  last?: string
+  count: number
+}
+
+/** What each outreach route looks like right now, deduced from logged activity. */
+export function channelStates(o: Opportunity): ChannelState[] {
+  const acts = (o.activity ?? []).filter((a) => a.channel !== 'Notes') as Activity[]
+  return CHANNELS.map((channel) => {
+    const rows = acts.filter((a) => a.channel === channel).sort((a, b) => b.at.localeCompare(a.at))
+    const last = rows[0]?.at
+    let state: ChannelState['state'] = 'Not started'
+    if (rows.some((r) => /bounced|undeliverable/i.test(r.text))) state = 'Bounced'
+    else if (rows.some((r) => /repl(ied|y)|answered|responded/i.test(r.text))) state = 'Replied'
+    else if (channel === 'LinkedIn' && rows.some((r) => /connect/i.test(r.text))) state = 'Connected'
+    else if (rows.length) state = 'Sent'
+    return { channel, state, last, count: rows.length }
+  })
 }
 export function activityEntry(text: string, channel: Activity['channel'] = 'Notes'): Activity {
   return { id: crypto.randomUUID(), at: new Date().toISOString(), channel, text }

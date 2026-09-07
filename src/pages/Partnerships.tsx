@@ -68,8 +68,12 @@ export function Partnerships() {
         </div>
 
         {tab === 'pipeline' && (
-          <div className="min-h-0 flex-1 overflow-auto">
-            <OpportunityWorkspace onOpen={setOpenId} onAdd={(brandId) => { setNewBrandId(brandId); setCreating(true) }} />
+          <div className="min-h-0 flex-1 overflow-hidden">
+            <OpportunityWorkspace
+              onOpen={(id) => setOpenId(id || null)}
+              onAdd={(brandId) => { setNewBrandId(brandId); setCreating(true) }}
+              selectedId={openId}
+            />
           </div>
         )}
 

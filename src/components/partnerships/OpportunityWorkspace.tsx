@@ -1,79 +1,355 @@
-import { useMemo, useState } from 'react'
-import { Map as MapIcon, Table2, Search, ArrowUpRight, Check, Clock3, Compass, Plus, ArrowDownUp } from 'lucide-react'
+import { useMemo, useRef, useState } from 'react'
 import { useAppStore } from '../../store/appStore'
-import { stageChange, actionState, activityEntry, completeAction, daysUntil, formatActionDate, health, ISLAND_AREAS, lastContact, localDate, STAGES, TYPE_INFO, type Brand, type Opportunity } from '../../lib/partnerships'
-import './opportunity-workspace.css'
+import {
+  DESTINATIONS,
+  OPEN_STAGES,
+  activityEntry,
+  actionState,
+  completeAction,
+  destinationIndex,
+  formatActionDate,
+  localDate,
+  outcomeOf,
+  worldHealth,
+  WORLD_HEALTH_COLOR,
+  type Brand,
+  type Opportunity,
+} from '../../lib/partnerships'
+import { Plus, Search } from '../Icon'
+import { PartnershipWorld, type WorldBrand } from './PartnershipWorld'
+import { PartnershipTable } from './PartnershipTable'
+import { RelationshipLog } from './RelationshipLog'
 
-const FILTERS = ['All', 'PR', 'Paid', 'UGC', 'Need Action', 'Waiting', 'Negotiating', 'Confirmed']
-const shortType = (o: Opportunity) => o.type === 'unsure' ? 'Not sure' : o.type === 'paid' ? 'Paid' : o.type.toUpperCase()
-const statusClass = (o: Opportunity) => health(o) === 'Healthy' ? 'healthy' : health(o) === 'Stalled' ? 'stalled' : 'attention'
-function Monogram({ name }: { name: string }) { return <span className="ow-monogram">{name.split(/\s+/).slice(0, 2).map(s => s[0]).join('').toUpperCase()}</span> }
-function Health({ o }: { o: Opportunity }) { return <span className={`ow-health ${statusClass(o)}`}><i />{health(o)}</span> }
-export function OpportunityWorkspace({ onOpen, onAdd }: { onOpen: (id: string) => void; onAdd: (brandId?: string) => void }) {
-  const brands = useAppStore(s => s.brands)
-  const opportunities = useAppStore(s => s.opportunities)
-  const update = useAppStore(s => s.updateOpportunity)
-  const updateBrand = useAppStore(s => s.updateBrand)
-  const [view, setView] = useState<'map' | 'table'>('map')
-  const [filter, setFilter] = useState('All')
+type View = 'world' | 'table' | 'log'
+const VIEWS: { id: View; label: string }[] = [
+  { id: 'world', label: 'World' },
+  { id: 'table', label: 'Table' },
+  { id: 'log', label: 'Log' },
+]
+
+const SAVED_VIEWS = ['Everything', 'Needs action', 'Live deals', 'Won & producing', 'Archive'] as const
+type SavedView = (typeof SAVED_VIEWS)[number]
+
+function dueTone(o: Opportunity): string {
+  const s = actionState(o)
+  if (s === 'overdue') return '#a05f57'
+  if (s === 'today') return '#8f6d33'
+  return '#9a9d97'
+}
+
+export function OpportunityWorkspace({
+  onOpen,
+  onAdd,
+  selectedId,
+}: {
+  onOpen: (id: string) => void
+  onAdd: (brandId?: string) => void
+  selectedId: string | null
+}) {
+  const brands = useAppStore((s) => s.brands)
+  const opportunities = useAppStore((s) => s.opportunities)
+  const update = useAppStore((s) => s.updateOpportunity)
+
+  const [view, setView] = useState<View>('world')
   const [query, setQuery] = useState('')
-  const [sort, setSort] = useState('brand')
-  const [descending, setDescending] = useState(false)
-  const [notice, setNotice] = useState('')
-  const live = useMemo(() => opportunities.filter(o => !o.deletedAt), [opportunities])
-  const byId = useMemo(() => new Map<string, Brand>(brands.filter(b => !b.deletedAt).map(b => [b.id, b])), [brands])
-  const name = (o: Opportunity) => byId.get(o.brandId)?.name ?? 'Unknown brand'
-  const visible = live.filter(o => {
-    const matchesQuery = `${name(o)} ${o.title} ${o.nextAction} ${byId.get(o.brandId)?.contactEmail ?? ''}`.toLowerCase().includes(query.toLowerCase())
-    const matchesFilter = filter === 'All' || shortType(o) === filter || (filter === 'Need Action' && health(o) !== 'Healthy') || (filter === 'Waiting' && o.stage === 'Pitched') || (filter === 'Negotiating' && o.stage === 'Negotiating') || (filter === 'Confirmed' && ['Agreed', 'In production'].includes(o.stage))
-    return matchesQuery && matchesFilter
-  }).sort((a,b) => {
-    let compared = 0
-    if (sort === 'due') compared = (a.nextActionDate || '9999').localeCompare(b.nextActionDate || '9999')
-    else if (sort === 'stage') compared = STAGES.indexOf(a.stage) - STAGES.indexOf(b.stage)
-    else if (sort === 'priority') compared = ['High','Normal','Low'].indexOf(a.priority ?? 'Normal') - ['High','Normal','Low'].indexOf(b.priority ?? 'Normal')
-    else compared = name(a).localeCompare(name(b))
-    return descending ? -compared : compared
-  })
-  const attention = live.filter(o => o.stage !== 'Paid' && (health(o) !== 'Healthy' || daysUntil(o.nextActionDate) === 1)).sort((a,b) => (daysUntil(a.nextActionDate) ?? 9999) - (daysUntil(b.nextActionDate) ?? 9999))
-  function complete(o: Opportunity) { update(o.id, completeAction(o)); setNotice(`${name(o)}: action completed. The next step is ready.`) }
-  function snooze(o: Opportunity) { update(o.id, { nextActionDate: localDate(1), activity: [...(o.activity ?? []), activityEntry('Snoozed next action until tomorrow')] }); setNotice(`${name(o)}: moved to tomorrow.`) }
-  return <div className="ow-workspace">
-    <section className="ow-today" aria-label="Today and needs attention">
-      <div className="ow-section-heading"><div><span className="ow-eyebrow">YOUR NEXT MOVES</span><h2>Today <span>{attention.length}</span></h2></div><span className="ow-muted">A little momentum goes a long way.</span></div>
-      {attention.length ? <div className="ow-today-cards">{attention.map(o => <article key={o.id} className="ow-today-card">
-        <div className="ow-card-top"><b>{name(o)}</b><span className={`ow-dot ${statusClass(o)}`} /></div>
-        <p>{o.nextAction || 'Set the next action'}</p><small>{actionState(o) === 'none' ? 'Needs a plan' : formatActionDate(o.nextActionDate)}</small>
-        <div className="ow-card-actions"><button onClick={() => o.nextAction ? complete(o) : onOpen(o.id)} aria-label={`Complete action for ${name(o)}`}><Check size={12} />{o.nextAction ? 'Complete' : 'Set action'}</button><button onClick={() => snooze(o)} aria-label={`Snooze ${name(o)}`}><Clock3 size={12} />Snooze</button><button onClick={() => onOpen(o.id)} aria-label={`Open ${name(o)}`} title="Open brand"><ArrowUpRight size={15} /></button></div>
-      </article>)}</div> : <div className="ow-clear"><Check size={16} /><span>{live.length ? 'You’re all caught up. Your next steps are scheduled.' : 'Your follow-ups will appear here. Start with a brand you have in mind.'}</span></div>}
-      <div className="ow-notice" role="status">{notice}</div>
-    </section>
-    <section className="ow-main" aria-label="Opportunities workspace">
-      <div className="ow-toolbar"><div><span className="ow-eyebrow">FROM FIRST IDEA TO LASTING RELATIONSHIP</span><h2>{view === 'map' ? 'Your partnership island' : 'Your opportunities'}</h2></div><div className="ow-view" aria-label="Opportunity view"><button aria-pressed={view === 'map'} onClick={() => setView('map')}><MapIcon size={14} />Map</button><button aria-pressed={view === 'table'} onClick={() => setView('table')}><Table2 size={14} />Table</button></div></div>
-      <div className="ow-controls"><div className="ow-filters">{FILTERS.map(f => <button key={f} aria-pressed={filter === f} onClick={() => setFilter(f)}>{f}</button>)}</div><label className="ow-search"><Search size={14} /><input aria-label="Search opportunities" placeholder="Find a brand…" value={query} onChange={e => setQuery(e.target.value)} /></label></div>
-      <div className="ow-subbar"><span>{visible.length} {visible.length === 1 ? 'opportunity' : 'opportunities'} · {new Set(visible.map(o => o.brandId)).size} {new Set(visible.map(o => o.brandId)).size === 1 ? 'brand' : 'brands'}</span><div className="ow-sort"><select aria-label="Sort opportunities" value={sort} onChange={e => setSort(e.target.value)}><option value="brand">Brand name</option><option value="due">Next deadline</option><option value="stage">Journey stage</option><option value="priority">Priority</option></select><button aria-label={descending ? 'Sort ascending' : 'Sort descending'} onClick={() => setDescending(!descending)}><ArrowDownUp size={13} /></button></div></div>
-      {view === 'map' ? <div className="ow-map-scroll"><div className="ow-island">
-        <svg className="ow-topography" viewBox="0 0 1400 1100" preserveAspectRatio="none" aria-hidden="true"><defs><pattern id="island-dots" width="20" height="20" patternUnits="userSpaceOnUse"><circle cx="2" cy="2" r=".65" fill="#b7bfb7" opacity=".35" /></pattern></defs><rect width="1400" height="1100" fill="url(#island-dots)" />{[0,1,2,3,4,5].map(i => <path key={i} transform={`translate(${i*24} ${i*19}) scale(${1-i*.035} ${1-i*.035})`} d="M90 320 C-70 150 320 -35 580 70 C820 -80 1330 65 1270 340 C1430 500 1310 670 1240 760 C1170 1060 760 1030 610 960 C290 1100 40 920 100 720 C-40 590 30 420 90 320Z" fill={i === 0 ? '#edf0e7' : 'none'} stroke="#ccd4c5" strokeWidth="1" opacity={i === 0 ? '.8' : '.65'} />)}<path d="M170 220 C410 30 520 250 700 220 S1170 100 1200 370 S540 620 240 510 S80 910 410 850 S1030 630 1200 910" stroke="#fcfcf9" strokeWidth="8" fill="none" /><path d="M170 220 C410 30 520 250 700 220 S1170 100 1200 370 S540 620 240 510 S80 910 410 850 S1030 630 1200 910" stroke="#c4bb9c" strokeWidth="1.4" strokeDasharray="4 6" fill="none" /></svg>
-        <div className="ow-map-title"><Compass size={21} /><span>THE PARTNERSHIP ISLAND<small>Every relationship has a place.</small></span></div>
-        <div className="ow-regions">{ISLAND_AREAS.map((area,i) => {
-          const items = visible.filter(o => area.stages.includes(o.stage))
-          return <section className={`ow-region ow-region-${i}`} key={area.name}><div className="ow-region-label"><span>{String(i+1).padStart(2,'0')}</span><div><h3>{area.name}</h3><p>{area.hint}</p></div><b>{items.length}</b></div>
-            <div className="ow-region-nodes">{items.map(o => <button className="ow-node" key={o.id} onClick={() => onOpen(o.id)}><div className="ow-node-brand"><Monogram name={name(o)} /><div><b>{name(o)}</b><small>{shortType(o)} · {o.stage}</small></div><ArrowUpRight size={13} /></div><p>{o.nextAction || 'Set the next action'}</p><div className="ow-node-foot"><span className={`ow-dot ${statusClass(o)}`} title={health(o)} /><span>{formatActionDate(o.nextActionDate) || 'No deadline'}</span><span>{o.priority === 'High' ? 'High priority' : ''}</span></div></button>)}{!items.length && <div className="ow-region-empty">{live.length ? 'Room for your next chapter' : 'Your journey starts here'}</div>}</div>
-          </section>
-        })}</div><div className="ow-map-legend"><span><i className="ow-dot healthy" />Healthy</span><span><i className="ow-dot attention" />Needs attention</span><span><i className="ow-dot stalled" />Stalled</span></div>
-      </div></div> : <div className="ow-table-scroll"><table className="ow-table"><thead><tr>{['Brand','Type','Stage','Next action','Due','Contact','Last contact','Value','Priority','Health'].map(h => <th key={h}>{h}</th>)}</tr></thead><tbody>{visible.map(o => <tr key={o.id}>
-        <td><button className="ow-table-brand" onClick={() => onOpen(o.id)}><Monogram name={name(o)} /><b>{name(o)}</b><ArrowUpRight size={12} /></button></td>
-        <td><select aria-label={`Type for ${name(o)}`} value={o.type} onChange={e => update(o.id, { type: e.target.value as Opportunity['type'] })}>{Object.values(TYPE_INFO).map(t => <option key={t.id} value={t.id}>{t.id === 'unsure' ? 'Not sure' : t.id === 'paid' ? 'Paid' : t.id.toUpperCase()}</option>)}</select></td>
-        <td><select aria-label={`Stage for ${name(o)}`} value={o.stage} onChange={e => update(o.id, stageChange(o, e.target.value as Opportunity['stage']))}>{STAGES.map(s => <option key={s}>{s}</option>)}</select></td>
-        <td><input aria-label={`Next action for ${name(o)}`} value={o.nextAction} placeholder="Add next step" onChange={e => update(o.id,{nextAction:e.target.value})} /></td>
-        <td><input type="date" aria-label={`Deadline for ${name(o)}`} value={o.nextActionDate} onChange={e => update(o.id,{nextActionDate:e.target.value})} /></td>
-        <td><input type="email" aria-label={`Contact for ${name(o)}`} value={byId.get(o.brandId)?.contactEmail ?? ''} placeholder="Add email" disabled={!byId.has(o.brandId)} onChange={e => updateBrand(o.brandId,{contactEmail:e.target.value})} /></td>
-        <td className="ow-muted">{lastContact(o) ? new Date(lastContact(o)).toLocaleDateString('en-GB',{day:'numeric',month:'short'}) : 'Not logged'}</td>
-        <td><input aria-label={`Value for ${name(o)}`} value={o.fee} placeholder="—" onChange={e => update(o.id,{fee:e.target.value})} /></td>
-        <td><select aria-label={`Priority for ${name(o)}`} value={o.priority ?? 'Normal'} onChange={e => update(o.id,{priority:e.target.value as Opportunity['priority']})}>{['High','Normal','Low'].map(p => <option key={p}>{p}</option>)}</select></td><td><Health o={o} /></td>
-      </tr>)}</tbody></table></div>}
-      {visible.length === 0 && <div className="ow-empty"><Compass size={25} /><h3>{live.length ? 'No opportunities match these filters' : 'Start with one brand. See where it goes.'}</h3><p>{live.length ? 'Try another search or show all opportunities.' : 'Add a brand and Director will lay out your next steps.'}</p><button className="ow-primary" onClick={live.length ? () => {setQuery('');setFilter('All')} : () => onAdd()}><Plus size={14} />{live.length ? 'Clear filters' : 'Add opportunity'}</button></div>}
-    </section>
-    {brands.some(b => !b.deletedAt && !live.some(o => o.brandId === b.id)) && <section className="mt-6 border-t border-[#e5e5e7] pt-5"><span className="ow-eyebrow">BRANDS TO EXPLORE</span><p className="mb-3 text-[12px] text-[#777b77]">Your saved brands without an active opportunity.</p><div className="flex flex-wrap gap-2">{brands.filter(b => !b.deletedAt && !live.some(o => o.brandId === b.id)).map(b => <button key={b.id} onClick={() => onAdd(b.id)} className="flex items-center gap-2 rounded-lg border border-[#e5e5e7] px-3 py-2 text-[12px]"><Monogram name={b.name} />{b.name}<Plus size={12}/></button>)}</div></section>}
-  </div>
+  const [savedView, setSavedView] = useState<SavedView>('Everything')
+  const resetViewRef = useRef<() => void>(() => {})
+
+  const live = useMemo(() => opportunities.filter((o) => !o.deletedAt), [opportunities])
+  const brandsById = useMemo(
+    () => new Map<string, Brand>(brands.filter((b) => !b.deletedAt).map((b) => [b.id, b])),
+    [brands],
+  )
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    return live.filter((o) => {
+      const brand = brandsById.get(o.brandId)
+      if (q) {
+        const hay = `${brand?.name ?? ''} ${o.title} ${o.nextAction} ${brand?.contactName ?? ''} ${brand?.contactEmail ?? ''}`.toLowerCase()
+        if (!hay.includes(q)) return false
+      }
+      switch (savedView) {
+        case 'Needs action': {
+          const h = worldHealth(o)
+          return h !== 'Moving well' && h !== 'Waiting'
+        }
+        case 'Live deals':
+          return ['Research', 'Concept', 'Ready to pitch', 'Pitched', 'Replied', 'Negotiating'].includes(o.stage)
+        case 'Won & producing':
+          return ['Agreed', 'In production', 'Delivered', 'Paid'].includes(o.stage)
+        case 'Archive':
+          return outcomeOf(o) === 'Declined' || o.stage === 'Relationship'
+        default:
+          return true
+      }
+    })
+  }, [live, brandsById, query, savedView])
+
+  const worldBrands: WorldBrand[] = useMemo(
+    () =>
+      filtered.map((o) => ({
+        id: o.id,
+        dest: destinationIndex(o),
+        health: worldHealth(o),
+        priority: o.priority ?? 'Normal',
+      })),
+    [filtered],
+  )
+
+  const inFlight = worldBrands.filter((b) => b.dest > 0 && b.dest < 9).length
+  const worldSummary = live.length
+    ? `${filtered.length} brand${filtered.length === 1 ? '' : 's'} across ${DESTINATIONS.length} destinations · ${inFlight} in flight`
+    : `${DESTINATIONS.length} destinations · no brands yet`
+
+  const today = useMemo(() => {
+    return live
+      .filter((o) => OPEN_STAGES.includes(o.stage))
+      .filter((o) => ['overdue', 'today'].includes(actionState(o)) || (!o.nextAction.trim() && o.stage !== 'Discovery'))
+      .sort((a, b) => (a.nextActionDate || '9999').localeCompare(b.nextActionDate || '9999'))
+      .slice(0, 12)
+  }, [live])
+
+  const complete = (o: Opportunity) => update(o.id, completeAction(o))
+  const snooze = (o: Opportunity) =>
+    update(o.id, {
+      nextActionDate: localDate(1),
+      activity: [...(o.activity ?? []), activityEntry('Snoozed next action until tomorrow')],
+    })
+
+  const viewTitle = view === 'world' ? 'Your partnership world' : view === 'table' ? 'Every opportunity' : 'Relationship log'
+
+  return (
+    <div className="flex h-full min-h-0 flex-col bg-white text-[#1C1C1E]">
+      <div className="flex shrink-0 items-center gap-3 border-b border-[#EDEDEF] bg-[#FCFCFB] px-8 py-2.5">
+        <div className="flex shrink-0 items-center gap-2">
+          <span className="text-[9px] font-semibold tracking-[1.6px] text-[#8e9189]">TODAY</span>
+          <span className="font-mono text-[10px] text-[#8f6d33]">{today.length}</span>
+        </div>
+        <div className="flex min-w-0 flex-1 gap-2 overflow-x-auto py-0.5">
+          {today.length === 0 && (
+            <div className="flex items-center gap-2 text-[12px] text-[#8e9189]">
+              {live.length
+                ? 'All caught up — nothing needs you today.'
+                : 'Your follow-ups will appear here.'}
+            </div>
+          )}
+          {today.map((o) => {
+            const brand = brandsById.get(o.brandId)
+            const h = worldHealth(o)
+            return (
+              <div
+                key={o.id}
+                className="flex shrink-0 items-center gap-2.5 rounded-full border border-[#E9E9EB] bg-white py-1 pl-3 pr-1.5 hover:border-[#dcd2ba]"
+              >
+                <span
+                  className="h-[6px] w-[6px] shrink-0 rounded-full"
+                  style={{ backgroundColor: WORLD_HEALTH_COLOR[h] }}
+                />
+                <span className="whitespace-nowrap text-[12px] font-medium text-[#1C1C1E]">
+                  {brand?.name ?? 'Unknown brand'}
+                </span>
+                <span className="whitespace-nowrap text-[11.5px] text-[#6f7370]">
+                  {o.nextAction || 'Set the next action'}
+                </span>
+                <span
+                  className="whitespace-nowrap font-mono text-[10.5px]"
+                  style={{ color: dueTone(o) }}
+                >
+                  {formatActionDate(o.nextActionDate) || 'No date'}
+                </span>
+                <span className="ml-0.5 flex items-center gap-0.5 border-l border-[#EDEDEF] pl-1.5">
+                  <button
+                    onClick={() => complete(o)}
+                    title="Complete"
+                    className="rounded-md bg-transparent px-1.5 py-1 text-[11px] text-[#8e9189] hover:bg-[#F2F5F1] hover:text-[#5f7d69]"
+                  >
+                    ✓
+                  </button>
+                  <button
+                    onClick={() => snooze(o)}
+                    title="Snooze"
+                    className="rounded-md bg-transparent px-1.5 py-1 text-[10px] text-[#8e9189] hover:bg-[#F7F7F5] hover:text-[#1C1C1E]"
+                  >
+                    Snooze
+                  </button>
+                  <button
+                    onClick={() => onOpen(o.id)}
+                    title="Open brand"
+                    className="rounded-md bg-transparent px-1.5 py-1 text-[11px] text-[#8e9189] hover:bg-[#F7F7F5] hover:text-[#1C1C1E]"
+                  >
+                    ↗
+                  </button>
+                </span>
+              </div>
+            )
+          })}
+        </div>
+      </div>
+
+      <div className="flex shrink-0 flex-wrap items-center gap-3.5 px-8 pb-3 pt-3.5">
+        <div className="min-w-0">
+          <div className="text-[9px] font-semibold tracking-[1.7px] text-[#8e9189]">
+            FROM FIRST SIGNAL TO LASTING RELATIONSHIP
+          </div>
+          <h2 className="mt-1 font-display text-[19px] font-medium text-[#1C1C1E]">{viewTitle}</h2>
+        </div>
+        <div className="ml-auto flex flex-wrap items-center gap-2.5">
+          <label className="flex items-center gap-1.5 rounded-md border border-[#E5E5E7] px-2.5 py-1.5 text-[#9a9d97]">
+            <Search size={12} strokeWidth={2} />
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Find a brand…"
+              className="w-[132px] border-0 bg-transparent text-[11.5px] text-[#1C1C1E] outline-none"
+            />
+          </label>
+          <select
+            value={savedView}
+            onChange={(e) => setSavedView(e.target.value as SavedView)}
+            className="cursor-pointer rounded-md border border-[#E5E5E7] bg-white px-2 py-1.5 text-[11.5px] text-[#4a4d48]"
+          >
+            {SAVED_VIEWS.map((v) => (
+              <option key={v}>{v}</option>
+            ))}
+          </select>
+          <div className="flex gap-0.5 rounded-md border border-[#E8E8E2] bg-[#F3F3F0] p-[3px]">
+            {VIEWS.map((v) => {
+              const on = view === v.id
+              return (
+                <button
+                  key={v.id}
+                  onClick={() => setView(v.id)}
+                  className="rounded px-3 py-1.5 text-[11.5px]"
+                  style={{
+                    background: on ? '#ffffff' : 'transparent',
+                    color: on ? '#1C1C1E' : '#81817a',
+                    boxShadow: on ? '0 1px 4px rgba(0,0,0,.07)' : 'none',
+                  }}
+                >
+                  {v.label}
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      </div>
+
+      <div className="relative mx-8 mb-6 min-h-[440px] flex-1 overflow-hidden rounded-2xl border border-[#E5E5E7] bg-[#F7F7F5]">
+        {view === 'world' && (
+          <>
+            <PartnershipWorld
+              brands={worldBrands}
+              selectedId={selectedId}
+              onSelect={(id) => (id ? onOpen(id) : onOpen(''))}
+              onResetRef={(fn) => {
+                resetViewRef.current = fn
+              }}
+            />
+            <div className="pointer-events-none absolute inset-0">
+              <div className="pointer-events-auto absolute left-4 top-4 flex items-center gap-2.5 rounded-xl border border-[#E9E9EB] bg-white/90 px-3.5 py-2.5 shadow-[0_3px_14px_rgba(60,58,50,.06)] backdrop-blur-md">
+                <div className="h-[26px] w-[26px] rounded-lg border border-[#E5DFD1] bg-[#F2EFE7]" />
+                <div>
+                  <div className="text-[9px] font-semibold tracking-[1.5px] text-[#8e9189]">
+                    THE PARTNERSHIP WORLD
+                  </div>
+                  <div className="mt-0.5 text-[11.5px] text-[#6f7370]">{worldSummary}</div>
+                </div>
+              </div>
+
+              {live.length === 0 && (
+                <div className="pointer-events-auto absolute left-1/2 top-1/2 w-[340px] -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-[#E9E9EB] bg-white/95 px-6 py-6 text-center shadow-[0_8px_30px_rgba(60,58,50,.08)] backdrop-blur-md">
+                  <div className="mx-auto mb-3.5 h-[34px] w-[34px] rounded-xl border border-[#E5DFD1] bg-[#F2EFE7]" />
+                  <h3 className="font-display text-[17px] text-[#1C1C1E]">
+                    The world is built. Nothing lives in it yet.
+                  </h3>
+                  <p className="mt-2 text-[12.5px] leading-relaxed text-[#6f7370]">
+                    Add one brand and it appears at the Brand Radar. Everything after that follows the route —
+                    research, idea, pitch, reply, terms, gate.
+                  </p>
+                  <div className="mt-4 flex justify-center gap-2">
+                    <button
+                      onClick={() => onAdd()}
+                      className="rounded-lg border-0 bg-[#C8A86B] px-3.5 py-2 text-[12px] font-medium text-[#191713]"
+                    >
+                      Add a brand
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              <div className="pointer-events-auto absolute bottom-4 left-4 right-4 flex flex-wrap items-end justify-between gap-2">
+                <div className="flex flex-wrap items-center gap-4 rounded-full border border-[#E9E9EB] bg-white/90 px-4 py-2 text-[10.5px] text-[#6f7370] backdrop-blur-md">
+                  <span className="flex items-center gap-1.5">
+                    <i className="h-[6px] w-[6px] rounded-full" style={{ backgroundColor: WORLD_HEALTH_COLOR['Moving well'] }} />
+                    Moving well
+                  </span>
+                  <span className="flex items-center gap-1.5">
+                    <i className="h-[6px] w-[6px] rounded-full" style={{ backgroundColor: WORLD_HEALTH_COLOR['Needs attention'] }} />
+                    Needs attention
+                  </span>
+                  <span className="flex items-center gap-1.5">
+                    <i className="h-[6px] w-[6px] rounded-full" style={{ backgroundColor: WORLD_HEALTH_COLOR.Stalled }} />
+                    Stalled
+                  </span>
+                  <span className="flex items-center gap-1.5">
+                    <i className="h-[6px] w-[6px] rounded-full" style={{ backgroundColor: WORLD_HEALTH_COLOR.Waiting }} />
+                    Waiting
+                  </span>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="rounded-full border border-[#E9E9EB] bg-white/90 px-3 py-2 text-[10.5px] text-[#8e9189] backdrop-blur-md">
+                    Drag to orbit · Scroll to zoom · Click a brand
+                  </span>
+                  <button
+                    onClick={() => resetViewRef.current()}
+                    className="rounded-full border border-[#E9E9EB] bg-white/90 px-3 py-2 text-[10.5px] text-[#4a4d48] backdrop-blur-md hover:border-[#dcd2ba] hover:text-[#1C1C1E]"
+                  >
+                    Reset view
+                  </button>
+                </div>
+              </div>
+            </div>
+          </>
+        )}
+        {view === 'table' && (
+          <PartnershipTable opportunities={filtered} brandsById={brandsById} onOpen={onOpen} />
+        )}
+        {view === 'log' && (
+          <RelationshipLog opportunities={filtered} brandsById={brandsById} onOpen={onOpen} />
+        )}
+
+        {view !== 'world' && filtered.length === 0 && live.length > 0 && (
+          <div className="pointer-events-none absolute inset-0 grid place-items-center">
+            <div className="rounded-xl border border-[#E9E9EB] bg-white/95 px-5 py-4 text-center text-[12.5px] text-[#6f7370]">
+              No brands match these filters.
+            </div>
+          </div>
+        )}
+      </div>
+
+      {brands.some((b) => !b.deletedAt && !live.some((o) => o.brandId === b.id)) && (
+        <div className="mx-8 mb-5 border-t border-[#E5E5E7] pt-4">
+          <span className="text-[9px] font-semibold tracking-[1.5px] text-[#8e9189]">BRANDS TO EXPLORE</span>
+          <p className="mb-2 mt-1 text-[12px] text-[#777b77]">
+            Your saved brands without an active opportunity.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {brands
+              .filter((b) => !b.deletedAt && !live.some((o) => o.brandId === b.id))
+              .map((b) => (
+                <button
+                  key={b.id}
+                  onClick={() => onAdd(b.id)}
+                  className="flex items-center gap-2 rounded-lg border border-[#E5E5E7] px-3 py-1.5 text-[12px] text-[#4a4d48]"
+                >
+                  {b.name}
+                  <Plus size={12} strokeWidth={2} />
+                </button>
+              ))}
+          </div>
+        </div>
+      )}
+    </div>
+  )
 }
