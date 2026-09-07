@@ -1,0 +1,146 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-display: "Fraunces", Georgia, serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+
+  --color-bg: var(--dos-bg);
+  --color-surface: var(--dos-surface);
+  --color-surface-2: var(--dos-surface-2);
+  --color-elevated: var(--dos-elevated);
+  --color-border: var(--dos-border);
+  --color-border-soft: var(--dos-border-soft);
+  --color-ink: var(--dos-ink);
+  --color-ink-dim: var(--dos-ink-dim);
+  --color-ink-faint: var(--dos-ink-faint);
+  --color-gold: var(--dos-gold);
+  --color-gold-bright: var(--dos-gold-bright);
+  --color-gold-soft: var(--dos-gold-soft);
+  --color-sidebar: var(--dos-sidebar);
+  --color-sidebar-ink: var(--dos-sidebar-ink);
+  --color-sidebar-ink-dim: var(--dos-sidebar-ink-dim);
+  --color-sidebar-border: var(--dos-sidebar-border);
+  --color-sidebar-hover: var(--dos-sidebar-hover);
+
+  --animate-fade-in: fade-in 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+  --animate-rise: rise 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+
+  @keyframes fade-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+  @keyframes rise {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+}
+
+:root {
+  color-scheme: dark;
+
+  --dos-bg: #131214;
+  --dos-surface: #1a191c;
+  --dos-surface-2: #201f22;
+  --dos-elevated: #232226;
+  --dos-border: #2f2e32;
+  --dos-border-soft: #262528;
+  --dos-ink: #f3ede0;
+  --dos-ink-dim: #a8a29a;
+  --dos-ink-faint: #6f6b66;
+  --dos-gold: #d3a75c;
+  --dos-gold-bright: #ecc27e;
+  --dos-gold-soft: rgba(211, 167, 92, 0.14);
+  --dos-sidebar: #0c0c0d;
+  --dos-sidebar-ink: #f3ede0;
+  --dos-sidebar-ink-dim: #8b8781;
+  --dos-sidebar-border: #201f21;
+  --dos-sidebar-hover: #18171a;
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+
+  --dos-bg: #f7f4ec;
+  --dos-surface: #ffffff;
+  --dos-surface-2: #fbf9f3;
+  --dos-elevated: #ffffff;
+  --dos-border: #e7e1d2;
+  --dos-border-soft: #efeadd;
+  --dos-ink: #201e1a;
+  --dos-ink-dim: #6d6659;
+  --dos-ink-faint: #9d9585;
+  --dos-gold: #a97b2f;
+  --dos-gold-bright: #8a6425;
+  --dos-gold-soft: rgba(169, 123, 47, 0.12);
+  --dos-sidebar: #171613;
+  --dos-sidebar-ink: #f3ede0;
+  --dos-sidebar-ink-dim: #948e83;
+  --dos-sidebar-border: #26241f;
+  --dos-sidebar-hover: #211f1b;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html, body, #root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--color-bg);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  transition: background-color 0.25s ease, color 0.25s ease;
+}
+
+::selection {
+  background: var(--dos-gold);
+  color: #131214;
+}
+
+::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-ink-faint);
+}
+
+input, textarea, select, button {
+  font-family: inherit;
+}
+
+/* Mouse clicks stay clean, but keyboard focus is always visible. The previous
+   blanket `outline: none` on inputs left keyboard users with no idea where they
+   were — the one accessibility failure that makes every other one worse. */
+:focus:not(:focus-visible) {
+  outline: none;
+}
+
+/* Not :where() — its zero specificity let Tailwind's reset win on outline-color,
+   which rendered the ring in near-black on a dark UI, i.e. invisible. */
+a:focus-visible,
+button:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid var(--dos-gold);
+  outline-offset: 2px;
+}
+
+.font-display {
+  font-family: var(--font-display);
+}
