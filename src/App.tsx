@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
+import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import { ThemeProvider } from './lib/theme'
 import { Sidebar } from './components/Sidebar'
 import { AIAssistant } from './components/AIAssistant'
@@ -25,6 +25,17 @@ import { CommandPalette } from './components/CommandPalette'
 function isTypingTarget(target: EventTarget | null) {
   if (!(target instanceof HTMLElement)) return false
   return target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable
+}
+
+/**
+ * The Contact Nucleus is a step inside the pitch flow and carries its own rail —
+ * pitch, journey and connector state — so the global nav stands down for it
+ * rather than stacking two dark columns and squeezing the stage.
+ */
+function NavRail() {
+  const { pathname } = useLocation()
+  if (/^\/partnerships\/opportunities\/[^/]+\/contacts$/.test(pathname)) return null
+  return <Sidebar />
 }
 
 function App() {
@@ -73,7 +84,7 @@ function App() {
       <ErrorBoundary>
       <BrowserRouter>
         <div className="flex h-screen w-screen overflow-hidden bg-bg text-ink">
-          <Sidebar />
+          <NavRail />
           <main className="relative flex-1 overflow-hidden">
             <Routes>
               <Route path="/" element={<Navigate to="/projects" replace />} />
