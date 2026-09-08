@@ -43,11 +43,26 @@ export async function sendProposal(draft: Draft): Promise<SentMessage> {
   }
 
   const token = await getAccessToken()
-  const res = await fetch(SEND_ENDPOINT, {
-    method: 'POST',
-    headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
-    body: JSON.stringify({ raw: encodeForGmail(draft) }),
-  })
+
+  let res: Awaited<ReturnType<typeof fetch>>
+  try {
+    res = await fetch(SEND_ENDPOINT, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ raw: encodeForGmail(draft) }),
+    })
+  } catch (err) {
+    // Tauri refuses any host missing from the HTTP capability allowlist, and
+    // says so in terms that read like a Google problem when it is ours. Name it,
+    // because the fix is in this repo rather than in anyone's Google account.
+    const message = err instanceof Error ? err.message : String(err)
+    if (/not allowed|forbidden|scope/i.test(message)) {
+      throw new Error(
+        'Director OS is not allowed to reach the Gmail API. That is a build setting in this app, not a Google permission — gmail.googleapis.com has to be in src-tauri/capabilities.',
+      )
+    }
+    throw new Error(`Could not reach Gmail: ${message}`)
+  }
 
   const text = await res.text()
   let body: unknown

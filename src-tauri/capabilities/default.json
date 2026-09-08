@@ -27,6 +27,9 @@
         },
         {
           "url": "https://graph.facebook.com/*"
+        },
+        {
+          "url": "https://gmail.googleapis.com/*"
         }
       ]
     }
