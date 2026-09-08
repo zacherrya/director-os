@@ -40,6 +40,8 @@ export interface NucleusHandle {
   reset: () => void
   /** Run the send pulse from a person into the nucleus. */
   signal: (personId: string) => void
+  /** Dolly in or out. Below 1 moves closer, above 1 pulls back. */
+  zoom: (factor: number) => void
 }
 
 interface Props {
@@ -114,6 +116,10 @@ interface SceneState {
   signalRun: { from: THREE.Vector3; t: number } | null
   open: number
   hovered: string | null
+  /** Shift is held, so a left-drag pans instead of orbiting. */
+  panMode: boolean
+  /** Last cursor written to the canvas, so the loop only touches style on change. */
+  cursor: string
   reduce: boolean
   selectedId: string | null
   disposables: { dispose: () => void }[]
@@ -206,14 +212,38 @@ export function NucleusStage({
     const controls = new OrbitControls(cam, renderer.domElement)
     controls.enableDamping = true
     controls.dampingFactor = 0.08
-    controls.minDistance = 22
-    controls.maxDistance = 96
+    // A wider range than the design's 22–96: people sit close in around their
+    // department, and reading one cluster means getting properly near it.
+    controls.minDistance = 14
+    controls.maxDistance = 130
     controls.minPolarAngle = 0.5
     controls.maxPolarAngle = 2.1
-    controls.rotateSpeed = 0.5
+    controls.rotateSpeed = 0.7
     controls.zoomSpeed = 0.7
-    controls.panSpeed = 0.6
+    controls.panSpeed = 0.9
+    controls.keyPanSpeed = 18
+    controls.screenSpacePanning = true
+    // Zoom towards whatever is under the pointer, so leaning into a cluster is
+    // one gesture rather than zoom-then-pan-then-zoom.
+    controls.zoomToCursor = true
+    // Pan freely, but never far enough to lose the brand off-screen and have to
+    // hunt for it — the nucleus is the thing every other position is read against.
+    controls.maxTargetRadius = 42
+    // Middle-drag pans rather than dollies: scroll already zooms, and panning is
+    // the gesture with nowhere else to live.
+    controls.mouseButtons = { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.PAN, RIGHT: THREE.MOUSE.PAN }
+    controls.touches = { ONE: THREE.TOUCH.ROTATE, TWO: THREE.TOUCH.DOLLY_PAN }
     controls.target.set(0, 0, 0)
+
+    // The stage takes focus so it can be driven from the keyboard. Bound to the
+    // canvas rather than the window, so arrowing through the search field never
+    // moves the camera.
+    renderer.domElement.tabIndex = 0
+    renderer.domElement.style.outline = 'none'
+    renderer.domElement.setAttribute(
+      'aria-label',
+      'Contact network. Drag to rotate, shift-drag to pan, scroll to zoom. Arrow keys pan, plus and minus zoom, 0 re-centres.',
+    )
 
     const state: SceneState = {
       scene, cam, renderer, controls, root, deptLayer, peopleLayer, linkLayer, labelHost,
@@ -222,7 +252,7 @@ export function NucleusStage({
       ray: new THREE.Raycaster(), pointer: new THREE.Vector2(-9, -9),
       home: { pos: cam.position.clone(), target: new THREE.Vector3(0, 0, 0) },
       fly: null, signal: null, signalRun: null,
-      open: 0, hovered: null, reduce: false, selectedId: null,
+      open: 0, hovered: null, panMode: false, cursor: 'grab', reduce: false, selectedId: null,
       disposables: [{ dispose: () => { floorGeo.dispose(); floorMat.dispose() } }],
     }
     api.current = state
@@ -250,6 +280,63 @@ export function NucleusStage({
     el.addEventListener('pointerdown', onDown)
     el.addEventListener('pointerup', onUp)
 
+    // Hold shift and the left button pans instead of orbiting — the same
+    // shortcut design tools use, so it costs nobody a lookup. Mutating the
+    // existing map is deliberate: OrbitControls reads it fresh on pointerdown.
+    const setPan = (on: boolean) => {
+      if (state.panMode === on) return
+      state.panMode = on
+      controls.mouseButtons.LEFT = on ? THREE.MOUSE.PAN : THREE.MOUSE.ROTATE
+    }
+    /**
+     * Slide camera and focus together by a screen-space nudge, so a key press
+     * moves the view by the same amount wherever the camera happens to be.
+     * Hand-rolled rather than OrbitControls' listenToKeyEvents so that panning,
+     * zooming and re-centring all arrive through one path — that API only pans.
+     */
+    const panBy = (dx: number, dy: number) => {
+      const offset = new THREE.Vector3().subVectors(cam.position, controls.target)
+      const reach = offset.length() * Math.tan(((cam.fov / 2) * Math.PI) / 180)
+      const right = new THREE.Vector3().setFromMatrixColumn(cam.matrix, 0)
+      const up = new THREE.Vector3().setFromMatrixColumn(cam.matrix, 1)
+      const height = el.clientHeight || 1
+      const move = new THREE.Vector3()
+        .addScaledVector(right, (-2 * dx * reach) / height)
+        .addScaledVector(up, (2 * dy * reach) / height)
+      // Clamp the focus first, then move the camera by whatever the clamp
+      // allowed, so the pair never drifts apart at the edge of the leash.
+      const before = controls.target.clone()
+      controls.target.add(move).clampLength(0, controls.maxTargetRadius)
+      cam.position.add(controls.target.clone().sub(before))
+      state.fly = null
+    }
+
+    const STEP = 48
+    const onStageKey = (e: KeyboardEvent) => {
+      if (e.metaKey || e.ctrlKey || e.altKey) return
+      switch (e.key) {
+        case 'ArrowLeft': panBy(-STEP, 0); break
+        case 'ArrowRight': panBy(STEP, 0); break
+        case 'ArrowUp': panBy(0, -STEP); break
+        case 'ArrowDown': panBy(0, STEP); break
+        case '+': case '=': zoomBy(state, 0.82); break
+        case '-': case '_': zoomBy(state, 1.22); break
+        case '0': flyTo(state, state.home.pos, state.home.target); break
+        default: return
+      }
+      e.preventDefault()
+    }
+    el.addEventListener('keydown', onStageKey)
+
+    const onKeyDown = (e: KeyboardEvent) => { if (e.key === 'Shift') setPan(true) }
+    const onKeyUp = (e: KeyboardEvent) => { if (e.key === 'Shift') setPan(false) }
+    // Releasing shift outside the window never fires keyup, which would strand
+    // the stage in pan mode.
+    const onBlur = () => setPan(false)
+    window.addEventListener('keydown', onKeyDown)
+    window.addEventListener('keyup', onKeyUp)
+    window.addEventListener('blur', onBlur)
+
     const resize = () => {
       const w = host.clientWidth || 1, h = host.clientHeight || 1
       cam.aspect = w / h
@@ -270,6 +357,10 @@ export function NucleusStage({
       el.removeEventListener('pointerleave', onLeave)
       el.removeEventListener('pointerdown', onDown)
       el.removeEventListener('pointerup', onUp)
+      el.removeEventListener('keydown', onStageKey)
+      window.removeEventListener('keydown', onKeyDown)
+      window.removeEventListener('keyup', onKeyUp)
+      window.removeEventListener('blur', onBlur)
       state.disposables.forEach((d) => d.dispose())
       disposeTree(scene)
       renderer.dispose()
@@ -473,6 +564,9 @@ export function NucleusStage({
       const s = api.current
       if (s) flyTo(s, s.home.pos, s.home.target)
     },
+    zoom: (factor: number) => {
+      if (api.current) zoomBy(api.current, factor)
+    },
     signal: (personId: string) => {
       const s = api.current
       if (!s) return
@@ -594,10 +688,27 @@ function applyState(s: SceneState, selectedId: string | null, expandedDept: stri
   setOpacity(s.nucleus, selDept || expandedDept ? 0.65 : 1, false)
 }
 
-function flyTo(s: SceneState, pos: THREE.Vector3, target: THREE.Vector3) {
+/**
+ * Dolly in or out. Compounds from where the camera is *heading* rather than
+ * where it happens to be — read the live position and three quick taps fight
+ * the glide already in progress, zooming about one step between them.
+ */
+function zoomBy(s: SceneState, factor: number) {
+  const from = s.fly ? s.fly.toP : s.cam.position
+  const focus = s.fly ? s.fly.toT : s.controls.target
+  const offset = new THREE.Vector3().subVectors(from, focus)
+  const distance = Math.min(
+    Math.max(offset.length() * factor, s.controls.minDistance),
+    s.controls.maxDistance,
+  )
+  // Short glide, not the long establishing move a selection gets.
+  flyTo(s, focus.clone().add(offset.setLength(distance)), focus.clone(), 0.28)
+}
+
+function flyTo(s: SceneState, pos: THREE.Vector3, target: THREE.Vector3, seconds = 0.95) {
   s.fly = {
     fromP: s.cam.position.clone(), fromT: s.controls.target.clone(),
-    toP: pos.clone(), toT: target.clone(), t: 0, dur: s.reduce ? 0.001 : 0.95,
+    toP: pos.clone(), toT: target.clone(), t: 0, dur: s.reduce ? 0.001 : seconds,
   }
 }
 
@@ -655,10 +766,11 @@ function tick(s: SceneState, clock: THREE.Clock) {
   const hit = s.ray
     .intersectObjects([...s.peopleLayer.children, ...s.deptLayer.children], true)
     .filter((h) => h.object.visible)[0]
-  const id = hit ? (hit.object.userData.personId ?? `dept:${hit.object.userData.deptKey}`) : null
-  if (id !== s.hovered) {
-    s.hovered = id
-    s.renderer.domElement.style.cursor = id ? 'pointer' : 'grab'
+  s.hovered = hit ? (hit.object.userData.personId ?? `dept:${hit.object.userData.deptKey}`) : null
+  const cursor = s.panMode ? 'move' : s.hovered ? 'pointer' : 'grab'
+  if (cursor !== s.cursor) {
+    s.cursor = cursor
+    s.renderer.domElement.style.cursor = cursor
   }
 
   s.controls.update()

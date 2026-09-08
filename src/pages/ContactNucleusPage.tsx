@@ -468,10 +468,28 @@ export function ContactNucleusPage() {
                         <Legend color="#a05f57" dashed>Unreachable</Legend>
                       </div>
 
-                      <div className="absolute bottom-3.5 right-3.5 rounded-full border border-[#E9E9EB] bg-white/90 px-[13px] py-2 text-[10px] text-[#8e9189] backdrop-blur-md">
-                        Drag to rotate · Scroll to zoom · Click a person
+                      <div
+                        className="absolute bottom-3.5 right-[54px] rounded-full border border-[#E9E9EB] bg-white/90 px-[13px] py-2 text-[10px] text-[#8e9189] backdrop-blur-md"
+                        title="Drag to rotate. Shift-drag, right-drag or middle-drag to pan. Scroll to zoom towards the pointer. Click the stage, then use the arrow keys to pan."
+                      >
+                        Drag to rotate · Shift-drag to pan · Scroll to zoom · Click a person
                       </div>
                     </>
+                  )}
+
+                  {!empty && (
+                    <div className="absolute bottom-3.5 right-3.5 flex flex-col overflow-hidden rounded-[10px] border border-[#E9E9EB] bg-white/90 shadow-[0_3px_14px_rgba(60,58,50,.06)] backdrop-blur-md">
+                      <StageButton label="Zoom in" onClick={() => stage.current?.zoom(0.7)}>
+                        <path d="M3 8h10M8 3v10" />
+                      </StageButton>
+                      <StageButton label="Zoom out" onClick={() => stage.current?.zoom(1.42)}>
+                        <path d="M3 8h10" />
+                      </StageButton>
+                      <StageButton label="Re-centre the view" onClick={() => stage.current?.reset()}>
+                        <circle cx="8" cy="8" r="3.2" />
+                        <path d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2" />
+                      </StageButton>
+                    </div>
                   )}
 
                   {empty && (
@@ -781,6 +799,28 @@ export function ContactNucleusPage() {
 }
 
 /* ---------------------------------------------------------------- bits --- */
+
+/** One square on the stage's zoom cluster. Children are the icon's SVG paths. */
+function StageButton({
+  label, onClick, children,
+}: {
+  label: string
+  onClick: () => void
+  children: React.ReactNode
+}) {
+  return (
+    <button
+      onClick={onClick}
+      title={label}
+      aria-label={label}
+      className="grid h-[26px] w-[26px] place-items-center border-b border-[#EDEDEF] text-[#6f7370] transition last:border-b-0 hover:bg-[#F7F7F5] hover:text-[#1C1C1E]"
+    >
+      <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round">
+        {children}
+      </svg>
+    </button>
+  )
+}
 
 function Toggle({ on, onClick, children }: { on: boolean; onClick: () => void; children: React.ReactNode }) {
   return (
