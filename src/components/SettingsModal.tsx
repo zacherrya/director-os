@@ -12,6 +12,7 @@ import {
   getOpenAiKey,
   getYouTubeChannel,
   getYouTubeKey,
+  canSendGmail,
   canUploadToYouTube,
   hasGoogleAuth,
   setGoogleClientId,
@@ -78,6 +79,7 @@ function GoogleAuthSection() {
   // A connection made before uploading existed keeps working for analytics but
   // cannot publish, so it needs saying rather than failing later at the upload.
   const [canUpload, setCanUpload] = useState(canUploadToYouTube())
+  const [canSend, setCanSend] = useState(canSendGmail())
   const [busy, setBusy] = useState(false)
 
   async function handleConnect() {
@@ -90,6 +92,7 @@ function GoogleAuthSection() {
       await connectGoogle()
       setConnected(true)
       setCanUpload(canUploadToYouTube())
+      setCanSend(canSendGmail())
       toast.success('YouTube Analytics connected.')
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Could not connect.')
@@ -102,13 +105,14 @@ function GoogleAuthSection() {
     disconnectGoogle()
     setConnected(false)
     setCanUpload(false)
+    setCanSend(false)
     toast.success('Disconnected. Revoke access in your Google account to remove it fully.')
   }
 
   return (
     <div className="mt-5 border-t border-border-soft pt-4">
       <div className="mb-1 flex items-center gap-2">
-        <span className="text-[12.5px] font-medium text-ink">Deeper analytics</span>
+        <span className="text-[12.5px] font-medium text-ink">Deeper analytics, uploads and sending</span>
         {connected && (
           <span className="flex items-center gap-1 rounded-full bg-[#6bb15a]/15 px-1.5 py-0.5 text-[10px] font-medium text-[#6bb15a]">
             <Check size={9} /> Connected
@@ -116,11 +120,22 @@ function GoogleAuthSection() {
         )}
       </div>
       <p className="mb-3 text-[11.5px] leading-relaxed text-ink-faint">
-        Traffic sources, the real retention curve, which videos are suggesting yours — and uploading a
-        finished cut. Needs an OAuth client because these are private to the channel owner; the API key
-        above cannot reach them. Director OS asks for read-only analytics and permission to upload, which
-        does not let it edit or delete anything already on your channel.
+        Traffic sources, the real retention curve, which videos are suggesting yours, uploading a finished
+        cut — and sending a pitch from your own Gmail address. Needs an OAuth client because these are
+        private to the account owner; the API key above cannot reach them. Director OS asks for read-only
+        analytics, permission to upload, and permission to send mail. It cannot edit or delete anything
+        already on your channel, and <b className="font-medium text-ink-dim">it cannot read your inbox</b> —
+        `gmail.send` grants sending and nothing else.
       </p>
+
+      {connected && !canSend && (
+        <div className="mb-3 rounded-lg border border-gold/40 bg-gold-soft px-3 py-2.5">
+          <p className="text-[11.5px] leading-relaxed text-ink-dim">
+            This connection predates email sending, so pitches still have to be copied and pasted.
+            Disconnect and connect again to grant it — nothing else changes.
+          </p>
+        </div>
+      )}
 
       {connected && !canUpload && (
         <div className="mb-3 rounded-lg border border-gold/40 bg-gold-soft px-3 py-2.5">

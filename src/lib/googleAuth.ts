@@ -1,9 +1,10 @@
 /**
  * Google OAuth for YouTube (loopback + PKCE).
  *
- * Two scopes: read-only analytics, and permission to upload a video. Neither
- * allows editing or deleting anything already on the channel — that would need
- * `youtube.force-ssl`, which is deliberately not requested.
+ * Three scopes: read-only analytics, permission to upload a video, and
+ * permission to send mail as the user. None allows editing or deleting anything
+ * already on the channel — that would need `youtube.force-ssl`, which is
+ * deliberately not requested — and `gmail.send` cannot read the inbox.
  *
  * A connection made before uploading existed holds only the analytics scope and
  * keeps working, so callers check `canUploadToYouTube()` rather than assuming
@@ -20,6 +21,7 @@ import { invoke } from '@tauri-apps/api/core'
 import {
   setGoogleScopes,
   UPLOAD_SCOPE,
+  SEND_SCOPE,
   getGoogleClientId,
   getGoogleClientSecret,
   getGoogleRefreshToken,
@@ -34,6 +36,7 @@ import {
 const SCOPES = [
   'https://www.googleapis.com/auth/yt-analytics.readonly',
   UPLOAD_SCOPE,
+  SEND_SCOPE,
 ].join(' ')
 const AUTH_ENDPOINT = 'https://accounts.google.com/o/oauth2/v2/auth'
 const TOKEN_ENDPOINT = 'https://oauth2.googleapis.com/token'

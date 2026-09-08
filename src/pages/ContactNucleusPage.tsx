@@ -11,7 +11,11 @@ import {
   STATUS_META, buildStage, contactStatus, preferredRoute, relationshipStrength,
 } from '../lib/nucleus'
 import { contrastInk, shadesOf } from '../lib/brandColor'
-import { CHANNELS, journeyFor, type Channel } from '../lib/partnerships'
+import { CHANNELS, activityEntry, journeyFor, type Channel } from '../lib/partnerships'
+import { buildPitch, pitchProof } from '../lib/pitch'
+import { proposalSubject } from '../lib/gmailMessage'
+import { sendProposal } from '../lib/gmail'
+import { canSendGmail } from '../lib/credentials'
 import { NucleusStage, type NucleusHandle } from '../components/partnerships/NucleusStage'
 import { toast } from '../lib/toast'
 import { ExternalLink, Search } from '../components/Icon'
@@ -25,13 +29,20 @@ import { ExternalLink, Search } from '../components/Icon'
  * it rides on the line into each person, because a line is a relationship and a
  * sphere is a person.
  *
- * The rule that shapes everything else here is provenance. Director has no Gmail,
- * LinkedIn or Instagram connector — none — so it cannot read a company's staff
- * list, cannot send on your behalf, and will not draw a sphere for someone it
- * invented. Every field on this page was typed in by the user and carries the
- * source they gave it. That is why there is no "Send through Gmail" button and
- * why the empty state says what it says: an invented address costs a fortnight
- * of silence before anyone finds out.
+ * The rule that shapes everything else here is provenance. Director cannot read
+ * a company's staff list — there is no connector on earth that would let it —
+ * so it will not draw a sphere for someone it invented. Every field on this page
+ * was typed in by the user and carries the source they gave it. That is why the
+ * empty state says what it says: an invented address costs a fortnight of
+ * silence before anyone finds out.
+ *
+ * Sending is a narrower story than it looks. Email goes out through the user's
+ * own Gmail account once they connect it, and lands in their own Sent folder so
+ * the reply comes back to the same thread. LinkedIn and Instagram do not, and
+ * will not: LinkedIn has no messaging API outside its partner programme, and
+ * Meta forbids messaging anyone who has not messaged you first. Those two stay
+ * open-the-profile-and-send-it-yourself, and the copy says so rather than
+ * implying a button is coming.
  *
  * The recommendation shows its reasons and its doubts together, and anyone can
  * be chosen regardless of where the stage puts them.
@@ -78,6 +89,8 @@ export function ContactNucleusPage() {
   const createContact = useAppStore((s) => s.createContact)
   const updateContact = useAppStore((s) => s.updateContact)
   const updateOpportunity = useAppStore((s) => s.updateOpportunity)
+  const mediaKit = useAppStore((s) => s.mediaKit)
+  const socialPosts = useAppStore((s) => s.socialPosts)
 
   const [selId, setSelId] = useState<string | null>(null)
   const [expanded, setExpanded] = useState<string | null>(null)
@@ -95,6 +108,7 @@ export function ContactNucleusPage() {
   // follow you onto the next person you clicked.
   const [editingId, setEditingId] = useState<string | null>(null)
   const [width, setWidth] = useState(() => (typeof window === 'undefined' ? 1440 : window.innerWidth))
+  const [sending, setSending] = useState(false)
 
   const stage = useRef<NucleusHandle>(null)
 
@@ -218,6 +232,47 @@ export function ContactNucleusPage() {
     updateOpportunity(opportunity!.id, { ccContactIds: next })
   }
 
+  /**
+   * Sends the pitch as it currently reads, to the address on the record.
+   *
+   * Deliberately the same `buildPitch` the panel previews, so what goes out is
+   * what was on screen — regenerating it here from different inputs would let
+   * the preview and the sent mail drift apart without anyone noticing.
+   *
+   * Recording happens only after Gmail accepts. There is no retry: a second
+   * automatic attempt is how a brand receives the same pitch twice.
+   */
+  async function send(contact: Contact) {
+    const o = opportunity!
+    setSending(true)
+    try {
+      const { id } = await sendProposal({
+        to: contact.email,
+        toName: contact.name,
+        subject: proposalSubject(o.title, brand?.name),
+        body: buildPitch(o, brand, mediaKit, pitchProof(socialPosts)),
+      })
+      const today = new Date().toISOString().slice(0, 10)
+      updateContact(contact.id, {
+        lastContactedAt: today,
+        strength: contact.strength === 'Not contacted' ? 'Contacted' : contact.strength,
+      })
+      updateOpportunity(o.id, {
+        recipientContactId: contact.id,
+        recipientChannel: 'Email',
+        activity: [
+          ...(o.activity ?? []),
+          activityEntry(`Pitch emailed to ${contact.name || contact.email} (Gmail ${id})`, 'Email'),
+        ],
+      })
+      toast.success(`Sent to ${contact.email}. It is in your Gmail Sent folder.`)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Gmail refused the message.')
+    } finally {
+      setSending(false)
+    }
+  }
+
   function addNote() {
     const text = draft.trim()
     if (!text || !sel) return
@@ -301,14 +356,20 @@ export function ContactNucleusPage() {
           <div className="flex-1" />
 
           {/*
-            The design left room here for connected accounts. Director has none —
-            no Gmail, LinkedIn or Instagram connector exists — so rather than a
-            row of "connect" buttons that lead nowhere, this says the true thing.
+            The design left room here for a list of connected accounts. Only one
+            of the three can ever be listed: Gmail can send, while LinkedIn has
+            no messaging API outside its partner programme and Instagram forbids
+            messaging anyone who has not messaged you first. Saying which is
+            connected matters less than saying what it can and cannot do.
           */}
           <div className="px-4 pb-4">
             <div className="border-t border-[#26241f] pt-3.5 text-[10.5px] leading-[1.55] text-[#7d766a]">
-              Connectors: <span className="text-[#f3ede0]">None</span>
-              <div className="mt-1">Director cannot read a staff list or send for you. Everyone here you added.</div>
+              Sending: <span className="text-[#f3ede0]">{canSendGmail() ? 'Gmail' : 'Nothing connected'}</span>
+              <div className="mt-1">
+                {canSendGmail()
+                  ? 'Email only. LinkedIn and Instagram have no send API. Everyone here you added.'
+                  : 'Director cannot read a staff list or send for you. Everyone here you added.'}
+              </div>
             </div>
           </div>
         </aside>
@@ -711,6 +772,9 @@ export function ContactNucleusPage() {
                   onPatch={(p) => updateContact(sel.id, p)}
                   onChoose={(ch) => choose(sel, ch)}
                   onToggleCc={() => toggleCc(sel)}
+                  onSend={() => send(sel)}
+                  sending={sending}
+                  canSend={canSendGmail()}
                   draft={draft}
                   onDraft={setDraft}
                   onAddNote={addNote}
@@ -891,7 +955,8 @@ function Field({ k, v, src, tone }: { k: string; v: string; src: string; tone?: 
  */
 function SelectedContact({
   contact, brandName, shade, isRecipient, isCc, duplicate, editing,
-  onToggleEdit, onPatch, onChoose, onToggleCc, draft, onDraft, onAddNote, loaded,
+  onToggleEdit, onPatch, onChoose, onToggleCc, onSend, sending, canSend,
+  draft, onDraft, onAddNote, loaded,
 }: {
   contact: Contact
   brandName: string
@@ -904,6 +969,9 @@ function SelectedContact({
   onPatch: (p: Partial<Contact>) => void
   onChoose: (ch: Channel) => void
   onToggleCc: () => void
+  onSend: () => void
+  sending: boolean
+  canSend: boolean
   draft: string
   onDraft: (v: string) => void
   onAddNote: () => void
@@ -1048,6 +1116,15 @@ function SelectedContact({
       <div className="mt-[18px]">
         <div className={`${EYEBROW} mb-2.5`}>CONTACT ACTIONS</div>
         <div className="flex flex-wrap gap-[7px]">
+          {canSend && contact.email.trim() && status !== 'invalid' && (
+            <button
+              onClick={onSend}
+              disabled={sending}
+              className="flex items-center gap-1.5 rounded-lg border border-[#C8A86B]/60 bg-[#C8A86B]/10 px-[11px] py-[7px] text-[11px] font-medium text-[#7d5f2c] transition hover:border-[#C8A86B] disabled:opacity-60"
+            >
+              {sending ? 'Sending…' : 'Send the pitch by email'}
+            </button>
+          )}
           {contact.email.trim() && (
             <Action onClick={() => copy(contact.email, 'Email')}>Copy email</Action>
           )}
@@ -1080,9 +1157,9 @@ function SelectedContact({
           <Action tone="danger" onClick={() => onPatch({ state: 'Left company' })}>Mark as left company</Action>
         </div>
         <p className="mt-2.5 rounded-[9px] border border-[#EDEDEF] bg-[#FCFCFB] px-[11px] py-2.5 text-[10.5px] leading-[1.55] text-[#8e9189]">
-          Gmail, LinkedIn and Instagram are not connected — there is no connector behind this page — so Director
-          cannot send for you. Copy the message, open the profile, then mark it as sent. Nothing is recorded as
-          sent until you say so.
+          {canSend
+            ? 'Email goes out through your own Gmail account and lands in your Sent folder, so replies come back to the same thread. LinkedIn and Instagram have no send API Director can use — open the profile, send it yourself, then mark it as sent.'
+            : 'Director cannot send anything yet. Connect Google in Settings to send email from your own account; LinkedIn and Instagram have no send API it can use at all, so those stay copy-and-paste. Nothing is recorded as sent until you say so.'}
         </p>
       </div>
 

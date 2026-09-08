@@ -135,3 +135,9 @@ export const UPLOAD_SCOPE = 'https://www.googleapis.com/auth/youtube.upload'
 
 export const canUploadToYouTube = () =>
   hasGoogleAuth() && getGoogleScopes().split(/\s+/).includes(UPLOAD_SCOPE)
+
+/** Send mail as the user. Cannot read the inbox — Gmail treats those separately. */
+export const SEND_SCOPE = 'https://www.googleapis.com/auth/gmail.send'
+
+export const canSendGmail = () =>
+  hasGoogleAuth() && getGoogleScopes().split(/\s+/).includes(SEND_SCOPE)
