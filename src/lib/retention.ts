@@ -9,7 +9,7 @@
  */
 
 import type { Episode } from './types'
-import { engagementRate, type PostPerformance } from './social'
+import { engagementRate, type PostPerformance } from './social.ts'
 
 /** Below this many posts, a median is just one of the numbers. */
 const MIN_SAMPLE = 3

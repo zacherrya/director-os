@@ -21,6 +21,7 @@ import type {
 } from '../lib/types'
 import type { PostPerformance, SocialPlatform } from '../lib/social'
 import type { Brand, Opportunity, OpportunityStage, PartnershipType } from '../lib/partnerships'
+import { emptyContact, mergeContacts, type Contact } from '../lib/contacts'
 import type { ChannelTags, ChannelVerdict } from '../lib/neighbourhood'
 import type { RetentionSnapshot } from '../lib/retentionAnalysis'
 import { DEFAULT_SPEAKING_PACE, PACE_WORDS_PER_SECOND } from '../lib/types'
@@ -46,6 +47,7 @@ interface PersistedData {
   mediaKit: MediaKitProfile
   brands: Brand[]
   opportunities: Opportunity[]
+  contacts: Contact[]
 }
 
 export const EMPTY_MEDIA_KIT: MediaKitProfile = {
@@ -84,6 +86,7 @@ function loadPersistedData(): PersistedData | null {
           : EMPTY_MEDIA_KIT,
       brands: Array.isArray(parsed.brands) ? parsed.brands : [],
       opportunities: Array.isArray(parsed.opportunities) ? parsed.opportunities : [],
+      contacts: Array.isArray(parsed.contacts) ? parsed.contacts : [],
     } as PersistedData
   } catch {
     return null
@@ -173,6 +176,17 @@ function highestSavedId(data: PersistedData | null): number {
     scan(p.id)
     p.beats.forEach((b) => scan(b.id))
   })
+  // Every persisted collection has to be scanned, not just the ones that existed
+  // when this was written: a collection missed here restarts its counter at
+  // 10001 on the next load and silently reuses ids that are already in use, so
+  // two brands end up sharing one another's opportunities and contacts.
+  data.brands.forEach((b) => scan(b.id))
+  data.opportunities.forEach((o) => {
+    scan(o.id)
+    o.journey?.forEach((j) => scan(j.id))
+    o.activity?.forEach((a) => scan(a.id))
+  })
+  data.contacts.forEach((c) => scan(c.id))
   return max
 }
 
@@ -203,6 +217,7 @@ interface AppState {
   mediaKit: MediaKitProfile
   brands: Brand[]
   opportunities: Opportunity[]
+  contacts: Contact[]
 
   /** Replaces the cached retention shapes after an analytics refresh. */
   setRetention: (snapshots: RetentionSnapshot[]) => void
@@ -235,6 +250,13 @@ interface AppState {
   updateOpportunity: (opportunityId: string, patch: Partial<Opportunity>) => void
   setOpportunityStage: (opportunityId: string, stage: OpportunityStage) => void
   deleteOpportunity: (opportunityId: string) => void
+
+  /** Adds a person against a brand. Everything about them is user-supplied. */
+  createContact: (brandId: string, patch?: Partial<Contact>) => Contact
+  updateContact: (contactId: string, patch: Partial<Contact>) => void
+  deleteContact: (contactId: string) => void
+  /** Folds one record into another, keeping the survivor's own values. */
+  mergeContact: (keepId: string, dropId: string) => void
   addPlaybookRule: (rule: Omit<PlaybookRule, 'id' | 'createdAt'>) => PlaybookRule
   updatePlaybookRule: (ruleId: string, patch: Partial<PlaybookRule>) => void
   deletePlaybookRule: (ruleId: string) => void
@@ -514,6 +536,7 @@ export const useAppStore = create<AppState>(withUndo((set, get) => ({
   mediaKit: persisted?.mediaKit ?? EMPTY_MEDIA_KIT,
   brands: persisted?.brands ?? [],
   opportunities: persisted?.opportunities ?? [],
+  contacts: persisted?.contacts ?? [],
 
   loadWorkspace: (data) => {
     set(() => ({ ...data }))
@@ -563,6 +586,7 @@ export const useAppStore = create<AppState>(withUndo((set, get) => ({
       stage: 'Research',
       title: '',
       concept: '',
+      brandObservation: '',
       fit: '',
       audienceWhy: '',
       formats: [],
@@ -602,6 +626,44 @@ export const useAppStore = create<AppState>(withUndo((set, get) => ({
         o.id === opportunityId ? { ...o, deletedAt: now } : o,
       ),
     }))
+  },
+
+  createContact: (brandId, patch) => {
+    const contact: Contact = { ...emptyContact(brandId, nextId('contact')), ...patch }
+    set((state) => ({ contacts: [...state.contacts, contact] }))
+    return contact
+  },
+
+  updateContact: (contactId, patch) => {
+    set((state) => ({
+      contacts: state.contacts.map((c) => (c.id === contactId ? { ...c, ...patch } : c)),
+    }))
+  },
+
+  deleteContact: (contactId) => {
+    const now = new Date().toISOString()
+    set((state) => ({
+      contacts: state.contacts.map((c) => (c.id === contactId ? { ...c, deletedAt: now } : c)),
+    }))
+  },
+
+  mergeContact: (keepId, dropId) => {
+    const now = new Date().toISOString()
+    set((state) => {
+      const keep = state.contacts.find((c) => c.id === keepId)
+      const drop = state.contacts.find((c) => c.id === dropId)
+      if (!keep || !drop) return { contacts: state.contacts }
+      const merged = mergeContacts(keep, drop)
+      return {
+        contacts: state.contacts.map((c) => {
+          if (c.id === keepId) return merged
+          if (c.id === dropId) return { ...c, deletedAt: now }
+          // Anyone introduced by the folded record now points at the survivor,
+          // so a warm-introduction path is never left dangling.
+          return c.introducedById === dropId ? { ...c, introducedById: keepId } : c
+        }),
+      }
+    })
   },
 
   addPlaybookRule: (rule) => {
@@ -1171,6 +1233,7 @@ useAppStore.subscribe((state) => {
       mediaKit: state.mediaKit,
       brands: state.brands,
       opportunities: state.opportunities,
+      contacts: state.contacts,
     })
   }, 300)
 })

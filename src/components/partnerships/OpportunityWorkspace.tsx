@@ -16,7 +16,7 @@ import {
   type Opportunity,
 } from '../../lib/partnerships'
 import { Plus, Search } from '../Icon'
-import { PartnershipWorld, type WorldBrand } from './PartnershipWorld'
+import { PartnershipWorld, type DragMode, type WorldBrand } from './PartnershipWorld'
 import { PartnershipTable } from './PartnershipTable'
 import { RelationshipLog } from './RelationshipLog'
 
@@ -51,6 +51,22 @@ export function OpportunityWorkspace({
   const update = useAppStore((s) => s.updateOpportunity)
 
   const [view, setView] = useState<View>('world')
+  const [dragMode, setDragMode] = useState<DragMode>(() => {
+    try {
+      return localStorage.getItem('director-os-world-drag') === 'orbit' ? 'orbit' : 'pan'
+    } catch {
+      return 'pan'
+    }
+  })
+
+  function chooseDragMode(mode: DragMode) {
+    setDragMode(mode)
+    try {
+      localStorage.setItem('director-os-world-drag', mode)
+    } catch {
+      /* a private window just gets the default next time */
+    }
+  }
   const [query, setQuery] = useState('')
   const [savedView, setSavedView] = useState<SavedView>('Everything')
   const resetViewRef = useRef<() => void>(() => {})
@@ -93,14 +109,17 @@ export function OpportunityWorkspace({
         dest: destinationIndex(o),
         health: worldHealth(o),
         priority: o.priority ?? 'Normal',
+        color: brandsById.get(o.brandId)?.color,
       })),
-    [filtered],
+    [filtered, brandsById],
   )
 
   const inFlight = worldBrands.filter((b) => b.dest > 0 && b.dest < 9).length
+  // One brand can have two live deals, so this counts opportunities — which is
+  // what the world actually draws, one pin each.
   const worldSummary = live.length
-    ? `${filtered.length} brand${filtered.length === 1 ? '' : 's'} across ${DESTINATIONS.length} destinations · ${inFlight} in flight`
-    : `${DESTINATIONS.length} destinations · no brands yet`
+    ? `${filtered.length} opportunit${filtered.length === 1 ? 'y' : 'ies'} across ${DESTINATIONS.length} destinations · ${inFlight} in flight`
+    : `${DESTINATIONS.length} destinations · nothing here yet`
 
   const today = useMemo(() => {
     return live
@@ -213,6 +232,36 @@ export function OpportunityWorkspace({
               <option key={v}>{v}</option>
             ))}
           </select>
+          {view === 'world' && (
+            <div
+              className="flex gap-0.5 rounded-md border border-[#E8E8E2] bg-[#F3F3F0] p-[3px]"
+              role="group"
+              aria-label="What dragging does"
+            >
+              {([
+                ['pan', 'Pan', 'Drag to walk across the world'],
+                ['orbit', 'Orbit', 'Drag to swing around the centre'],
+              ] as const).map(([mode, label, title]) => {
+                const on = dragMode === mode
+                return (
+                  <button
+                    key={mode}
+                    onClick={() => chooseDragMode(mode)}
+                    title={title}
+                    aria-pressed={on}
+                    className="rounded px-3 py-1.5 text-[11.5px]"
+                    style={{
+                      background: on ? '#ffffff' : 'transparent',
+                      color: on ? '#1C1C1E' : '#81817a',
+                      boxShadow: on ? '0 1px 4px rgba(0,0,0,.07)' : 'none',
+                    }}
+                  >
+                    {label}
+                  </button>
+                )
+              })}
+            </div>
+          )}
           <div className="flex gap-0.5 rounded-md border border-[#E8E8E2] bg-[#F3F3F0] p-[3px]">
             {VIEWS.map((v) => {
               const on = view === v.id
@@ -240,6 +289,7 @@ export function OpportunityWorkspace({
           <>
             <PartnershipWorld
               brands={worldBrands}
+              dragMode={dragMode}
               selectedId={selectedId}
               onSelect={(id) => (id ? onOpen(id) : onOpen(''))}
               onResetRef={(fn) => {
@@ -299,7 +349,7 @@ export function OpportunityWorkspace({
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="rounded-full border border-[#E9E9EB] bg-white/90 px-3 py-2 text-[10.5px] text-[#8e9189] backdrop-blur-md">
-                    Drag to orbit · Scroll to zoom · Click a brand
+                    {dragMode === 'pan' ? 'Drag to move · Scroll to zoom · Click a brand' : 'Drag to orbit · Scroll to zoom · Click a brand'}
                   </span>
                   <button
                     onClick={() => resetViewRef.current()}

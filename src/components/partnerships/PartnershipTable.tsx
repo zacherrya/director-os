@@ -1,3 +1,4 @@
+import { contrastInk } from '../../lib/brandColor'
 import { useAppStore } from '../../store/appStore'
 import {
   DESTINATIONS,
@@ -146,7 +147,14 @@ export function PartnershipTable({
                       onClick={() => onOpen(o.id)}
                       className="flex items-center gap-2 border-0 bg-transparent p-0"
                     >
-                      <span className="grid h-[26px] w-[26px] place-items-center rounded-md border border-[#E5DFD1] bg-[#F5F3ED] text-[9.5px] font-semibold text-[#736F65]">
+                      <span
+                        className="grid h-[26px] w-[26px] place-items-center rounded-md border text-[9.5px] font-semibold"
+                        style={
+                          brand?.color
+                            ? { backgroundColor: brand.color, borderColor: brand.color, color: contrastInk(brand.color) }
+                            : { backgroundColor: '#F5F3ED', borderColor: '#E5DFD1', color: '#736F65' }
+                        }
+                      >
                         {monogram(brand?.name ?? '??')}
                       </span>
                       <b className="text-[11.5px] font-medium text-[#1C1C1E]">{brand?.name ?? 'Unknown brand'}</b>

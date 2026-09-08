@@ -1,6 +1,5 @@
 import { useEffect, useRef } from 'react'
 import * as THREE from 'three'
-import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { DESTINATIONS } from '../../lib/partnerships'
 
 /**
@@ -15,10 +14,19 @@ export interface WorldBrand {
   dest: number
   health: 'Moving well' | 'Needs attention' | 'Stalled' | 'Waiting'
   priority?: 'High' | 'Normal' | 'Low'
+  /** The brand's own `#RRGGBB`, painted on the face of the pin. The ring around
+   * it stays health-coloured, so identity never masks a stalled deal. */
+  color?: string
 }
+
+export type DragMode = 'pan' | 'orbit'
 
 interface WorldProps {
   brands: WorldBrand[]
+  /** 'pan' walks the camera across the world; 'orbit' swings it around the
+   * centre of view, which is the original behaviour. Vertical drag changes
+   * elevation in both. */
+  dragMode: DragMode
   selectedId: string | null
   onSelect: (id: string | null) => void
   onResetRef?: (fn: () => void) => void
@@ -33,6 +41,33 @@ const GREEN = 0x789681
 const AMBER = 0xb99a5c
 const RED = 0xb6746b
 const GREY = 0xa9a7a0
+
+/**
+ * Camera scheme. Left-drag is deliberately split by axis rather than orbited:
+ * horizontal drag pans the camera *and* its look-at sideways together, so the
+ * world is travelled along rather than spun around one focal point; vertical
+ * drag is purely elevation, from almost overhead down to standing eye level.
+ * The azimuth is therefore only ever changed by a scripted fly, never by drag.
+ */
+/** Near top-down. Not 0 — a perfectly vertical eye makes the up-vector degenerate. */
+const MIN_POLAR = 0.15
+/** ~84°. Stops just short of the horizon so the eye never dips under the island. */
+const MAX_POLAR = 1.47
+const MIN_DIST = 26
+const MAX_DIST = 190
+/** Island geometry runs x -56..70, z -27..22; destinations x -38..55, z -24..13.
+ *  Roughly a 20-unit margin on the destination span keeps the island in frame. */
+const PAN_MIN_X = -58
+const PAN_MAX_X = 75
+const PAN_MIN_Z = -44
+const PAN_MAX_Z = 33
+const PAN_SPEED = 1
+const PITCH_SPEED = 0.5
+/** Radians of swing per viewport-height of horizontal drag, in orbit mode. */
+const ORBIT_SPEED = 3.2
+const ZOOM_SPEED = 0.75
+/** Exponential damping rate, s⁻¹. ~6 matches the weight of OrbitControls' 0.075. */
+const DAMP = 6
 
 const healthHex: Record<WorldBrand['health'], number> = {
   'Moving well': GREEN,
@@ -421,15 +456,19 @@ function buildDestination(key: string, group: THREE.Group, M: Record<string, THR
   }
 }
 
-export function PartnershipWorld({ brands, selectedId, onSelect, onResetRef }: WorldProps) {
+export function PartnershipWorld({ brands, dragMode, selectedId, onSelect, onResetRef }: WorldProps) {
   const hostRef = useRef<HTMLDivElement | null>(null)
   const brandsRef = useRef(brands)
+  const dragModeRef = useRef(dragMode)
   const selectedRef = useRef(selectedId)
   const applyBrandsRef = useRef<(list: WorldBrand[]) => void>(() => {})
+  /** What the pins were last built from, so identical data is a no-op. */
+  const lastSignatureRef = useRef<string | null>(null)
   const applySelectionRef = useRef<(id: string | null) => void>(() => {})
   const resetRef = useRef<() => void>(() => {})
 
   brandsRef.current = brands
+  dragModeRef.current = dragMode
   selectedRef.current = selectedId
 
   useEffect(() => {
@@ -530,28 +569,50 @@ export function PartnershipWorld({ brands, selectedId, onSelect, onResetRef }: W
     const tokenLayer = new THREE.Group()
     scene.add(tokenLayer)
 
-    const controls = new OrbitControls(cam, renderer.domElement)
-    controls.enableDamping = true
-    controls.dampingFactor = 0.075
-    controls.minPolarAngle = 0.35
-    controls.maxPolarAngle = 1.18
-    controls.minDistance = 26
-    controls.maxDistance = 190
-    controls.rotateSpeed = 0.5
-    controls.panSpeed = 0.7
-    controls.zoomSpeed = 0.75
-    controls.screenSpacePanning = false
-    controls.target.set(9, 0, -1)
-    const home = { pos: cam.position.clone(), target: controls.target.clone() }
+    // ---- camera rig -------------------------------------------------------
+    // `target` / `sph` are what the camera is drawn from this frame; `goalT` /
+    // `goal` are where the input has asked it to be. The gap between the two
+    // is the damping, so every input path (drag, wheel, fly) feels the same.
+    const target = new THREE.Vector3(9, 0, -1)
+    const goalT = target.clone()
+    const sph = new THREE.Spherical().setFromVector3(cam.position.clone().sub(target))
+    const goal = { radius: sph.radius, phi: sph.phi, theta: sph.theta }
+    const home = { target: target.clone(), radius: sph.radius, phi: sph.phi, theta: sph.theta }
+    const offVec = new THREE.Vector3()
 
-    let fly: { fromP: THREE.Vector3; fromT: THREE.Vector3; toP: THREE.Vector3; toT: THREE.Vector3; t: number; dur: number } | null = null
+    const clampTarget = (v: THREE.Vector3) => {
+      v.x = THREE.MathUtils.clamp(v.x, PAN_MIN_X, PAN_MAX_X)
+      v.z = THREE.MathUtils.clamp(v.z, PAN_MIN_Z, PAN_MAX_Z)
+    }
+
+    let fly: {
+      fromT: THREE.Vector3
+      toT: THREE.Vector3
+      from: [number, number, number]
+      to: [number, number, number]
+      t: number
+      dur: number
+    } | null = null
     let currentTokens: THREE.Group[] = []
     let hovered: string | null = null
+    let dragging = false
 
     const flyTo = (d: (typeof DESTINATIONS)[number], zoom = 1) => {
-      const target = new THREE.Vector3(d.x, 1.5, d.z)
-      const off = new THREE.Vector3(-10, 15, 20).multiplyScalar(zoom + 0.9)
-      fly = { fromP: cam.position.clone(), fromT: controls.target.clone(), toP: target.clone().add(off), toT: target, t: 0, dur: 1.0 }
+      const to = new THREE.Vector3(d.x, 1.5, d.z)
+      clampTarget(to)
+      const s = new THREE.Spherical().setFromVector3(new THREE.Vector3(-10, 15, 20).multiplyScalar(zoom + 0.9))
+      fly = {
+        fromT: target.clone(),
+        toT: to,
+        from: [sph.radius, sph.phi, sph.theta],
+        to: [
+          THREE.MathUtils.clamp(s.radius, MIN_DIST, MAX_DIST),
+          THREE.MathUtils.clamp(s.phi, MIN_POLAR, MAX_POLAR),
+          s.theta,
+        ],
+        t: 0,
+        dur: 1.0,
+      }
     }
 
     const applySelection = (id: string | null) => {
@@ -593,7 +654,10 @@ export function PartnershipWorld({ brands, selectedId, onSelect, onResetRef }: W
           ring.rotation.x = Math.PI / 2
           ring.position.y = 2.02
           g.add(ring)
-          const face = new THREE.Mesh(new THREE.CircleGeometry(1.06, 26), mat(0xf9f7f1, { roughness: 0.55 }))
+          // Unbranded pins keep the world's ivory; a brand colour reads as one
+          // spot of ink on the map, which is the point of setting it.
+          const faceHex = b.color ? new THREE.Color(b.color).getHex() : 0xf9f7f1
+          const face = new THREE.Mesh(new THREE.CircleGeometry(1.06, 26), mat(faceHex, { roughness: 0.55 }))
           face.rotation.x = -Math.PI / 2
           face.position.y = 2.02
           g.add(face)
@@ -622,7 +686,14 @@ export function PartnershipWorld({ brands, selectedId, onSelect, onResetRef }: W
     applyBrandsRef.current = applyBrands
 
     resetRef.current = () => {
-      fly = { fromP: cam.position.clone(), fromT: controls.target.clone(), toP: home.pos.clone(), toT: home.target.clone(), t: 0, dur: 1.0 }
+      fly = {
+        fromT: target.clone(),
+        toT: home.target.clone(),
+        from: [sph.radius, sph.phi, sph.theta],
+        to: [home.radius, home.phi, home.theta],
+        t: 0,
+        dur: 1.0,
+      }
     }
     if (onResetRef) onResetRef(resetRef.current)
 
@@ -636,19 +707,93 @@ export function PartnershipWorld({ brands, selectedId, onSelect, onResetRef }: W
     }
     const onLeave = () => pointer.set(-9, -9)
     let down: [number, number] | null = null
+    let last: [number, number] = [0, 0]
+
+    const setCursor = () => {
+      renderer.domElement.style.cursor = dragging ? 'grabbing' : hovered ? 'pointer' : 'grab'
+    }
+    renderer.domElement.style.touchAction = 'none'
+    setCursor()
+
     const onDown = (e: PointerEvent) => {
       down = [e.clientX, e.clientY]
+      if (e.button !== 0) return
+      e.preventDefault()
+      dragging = true
+      last = [e.clientX, e.clientY]
+      try {
+        renderer.domElement.setPointerCapture(e.pointerId)
+      } catch {
+        /* capture is a nicety; dragging still works without it */
+      }
+      setCursor()
     }
+
+    const onDrag = (e: PointerEvent) => {
+      if (!dragging) return
+      const dx = e.clientX - last[0]
+      const dy = e.clientY - last[1]
+      last = [e.clientX, e.clientY]
+      if (!dx && !dy) return
+      fly = null // a scripted move yields the moment the user takes hold
+
+      const h = host.clientHeight || 1
+      if (dragModeRef.current === 'orbit') {
+        // Swing around whatever is being looked at, rather than walking past it.
+        goal.theta -= (dx / h) * ORBIT_SPEED
+      } else {
+        // Slide camera and look-at together along the camera's own right vector
+        // flattened onto the ground. Dragging right walks rightwards through the
+        // world, so more of the right-hand side comes into view.
+        const perPx = (2 * goal.radius * Math.tan((cam.fov / 2) * THREE.MathUtils.DEG2RAD)) / h
+        const amt = dx * perPx * PAN_SPEED
+        goalT.x += Math.cos(goal.theta) * amt
+        goalT.z += -Math.sin(goal.theta) * amt
+        clampTarget(goalT)
+      }
+
+      // Vertical: drag down lifts the eye overhead (small polar angle), drag up
+      // lowers it towards eye level but never past MAX_POLAR, so never under.
+      goal.phi = THREE.MathUtils.clamp(goal.phi - ((Math.PI * dy) / h) * PITCH_SPEED, MIN_POLAR, MAX_POLAR)
+    }
+
+    const endDrag = (e: PointerEvent) => {
+      if (!dragging) return
+      dragging = false
+      try {
+        renderer.domElement.releasePointerCapture(e.pointerId)
+      } catch {
+        /* nothing held */
+      }
+      setCursor()
+    }
+
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault()
+      fly = null
+      const f = Math.pow(0.95, ZOOM_SPEED)
+      goal.radius = THREE.MathUtils.clamp(e.deltaY < 0 ? goal.radius * f : goal.radius / f, MIN_DIST, MAX_DIST)
+    }
+
+    /** The canvas is a viewport, not a document; a right-click menu over it is noise. */
+    const onContextMenu = (e: Event) => e.preventDefault()
+
     const onUp = (e: PointerEvent) => {
+      endDrag(e)
       if (!down || Math.hypot(e.clientX - down[0], e.clientY - down[1]) > 5) return
       ray.setFromCamera(pointer, cam)
       const hitT = ray.intersectObjects(tokenLayer.children, true)[0]
       if (hitT) {
         const id = (hitT.object.userData as { brandId?: string }).brandId
         if (id) {
+          // Fly only when the selection actually changes. Clicking the brand you
+          // are already looking at should not yank the camera back a second time.
+          const changed = id !== selectedRef.current
           onSelect(id)
-          const b = brandsRef.current.find((x) => x.id === id)
-          if (b) flyTo(DESTINATIONS[b.dest], 0.86)
+          if (changed) {
+            const b = brandsRef.current.find((x) => x.id === id)
+            if (b) flyTo(DESTINATIONS[b.dest], 0.86)
+          }
         }
         return
       }
@@ -664,9 +809,13 @@ export function PartnershipWorld({ brands, selectedId, onSelect, onResetRef }: W
       onSelect(null)
     }
     renderer.domElement.addEventListener('pointermove', onMove)
+    renderer.domElement.addEventListener('pointermove', onDrag)
     renderer.domElement.addEventListener('pointerleave', onLeave)
     renderer.domElement.addEventListener('pointerdown', onDown)
     renderer.domElement.addEventListener('pointerup', onUp)
+    renderer.domElement.addEventListener('pointercancel', endDrag)
+    renderer.domElement.addEventListener('wheel', onWheel, { passive: false })
+    renderer.domElement.addEventListener('contextmenu', onContextMenu)
 
     const ro = new ResizeObserver(() => {
       const w = host.clientWidth || 1
@@ -692,10 +841,28 @@ export function PartnershipWorld({ brands, selectedId, onSelect, onResetRef }: W
       if (fly) {
         fly.t = Math.min(1, fly.t + dt / fly.dur)
         const k = 1 - Math.pow(1 - fly.t, 3)
-        cam.position.lerpVectors(fly.fromP, fly.toP, k)
-        controls.target.lerpVectors(fly.fromT, fly.toT, k)
+        goalT.lerpVectors(fly.fromT, fly.toT, k)
+        target.copy(goalT)
+        goal.radius = THREE.MathUtils.lerp(fly.from[0], fly.to[0], k)
+        goal.phi = THREE.MathUtils.lerp(fly.from[1], fly.to[1], k)
+        goal.theta = THREE.MathUtils.lerp(fly.from[2], fly.to[2], k)
+        sph.radius = goal.radius
+        sph.phi = goal.phi
+        sph.theta = goal.theta
         if (fly.t >= 1) fly = null
+      } else {
+        const k = 1 - Math.exp(-dt * DAMP)
+        target.lerp(goalT, k)
+        sph.radius += (goal.radius - sph.radius) * k
+        sph.phi += (goal.phi - sph.phi) * k
+        sph.theta += (goal.theta - sph.theta) * k
       }
+      cam.position.copy(target).add(offVec.setFromSpherical(sph))
+      cam.lookAt(target)
+      // Bring the view matrix forward now rather than at render time, so this
+      // frame's raycast and label projections use this frame's camera.
+      cam.updateMatrixWorld()
+      cam.matrixWorldInverse.copy(cam.matrixWorld).invert()
 
       if (!reduce) {
         const radar = groups.radar?.userData.spin as THREE.Group | undefined
@@ -722,14 +889,14 @@ export function PartnershipWorld({ brands, selectedId, onSelect, onResetRef }: W
       const id = h ? ((h.object.userData as { brandId?: string }).brandId ?? null) : null
       if (id !== hovered) {
         hovered = id
-        renderer.domElement.style.cursor = id ? 'pointer' : 'grab'
+        setCursor()
       }
 
       // labels
       const w = host.clientWidth
       const hh = host.clientHeight
       const v = new THREE.Vector3()
-      const dist = cam.position.distanceTo(controls.target)
+      const dist = cam.position.distanceTo(target)
       const show = dist < 260
       const far = dist > 132
       DESTINATIONS.forEach((d, i) => {
@@ -748,7 +915,6 @@ export function PartnershipWorld({ brands, selectedId, onSelect, onResetRef }: W
         }
       })
 
-      controls.update()
       renderer.render(scene, cam)
     })
 
@@ -761,9 +927,13 @@ export function PartnershipWorld({ brands, selectedId, onSelect, onResetRef }: W
       ro.disconnect()
       mq.removeEventListener('change', onReduce)
       renderer.domElement.removeEventListener('pointermove', onMove)
+      renderer.domElement.removeEventListener('pointermove', onDrag)
       renderer.domElement.removeEventListener('pointerleave', onLeave)
       renderer.domElement.removeEventListener('pointerdown', onDown)
       renderer.domElement.removeEventListener('pointerup', onUp)
+      renderer.domElement.removeEventListener('pointercancel', endDrag)
+      renderer.domElement.removeEventListener('wheel', onWheel)
+      renderer.domElement.removeEventListener('contextmenu', onContextMenu)
       renderer.dispose()
       host.removeChild(renderer.domElement)
       host.removeChild(labels)
@@ -771,6 +941,13 @@ export function PartnershipWorld({ brands, selectedId, onSelect, onResetRef }: W
   }, [onSelect, onResetRef])
 
   useEffect(() => {
+    // The parent hands over a fresh array on every render, and typing into any
+    // field in the side panel renders the parent. Rebuilding the pins for that
+    // tore down and re-added every mesh on each keystroke, which read as a
+    // flicker — so rebuild only when something the world actually draws differs.
+    const signature = brands.map((b) => `${b.id}:${b.dest}:${b.health}:${b.priority ?? ''}:${b.color ?? ''}`).join('|')
+    if (signature === lastSignatureRef.current) return
+    lastSignatureRef.current = signature
     applyBrandsRef.current(brands)
   }, [brands])
 

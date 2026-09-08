@@ -14,6 +14,7 @@ import { ContentCalendar } from './pages/ContentCalendar'
 import { RecentlyDeleted } from './pages/RecentlyDeleted'
 import { Analytics } from './pages/Analytics'
 import { Partnerships } from './pages/Partnerships'
+import { ContactNucleusPage } from './pages/ContactNucleusPage'
 import { Playbook } from './pages/Playbook'
 import { onPersistFailure, useAppStore } from './store/appStore'
 import { toast } from './lib/toast'
@@ -81,6 +82,10 @@ function App() {
               <Route path="/calendar" element={<ContentCalendar />} />
               <Route path="/analytics" element={<Analytics />} />
               <Route path="/partnerships" element={<Partnerships />} />
+              <Route
+                path="/partnerships/opportunities/:opportunityId/contacts"
+                element={<ContactNucleusPage />}
+              />
               {/* The media kit lives inside Partnerships now; keep the old path working. */}
               <Route path="/media-kit" element={<Navigate to="/partnerships" replace />} />
               <Route path="/playbook" element={<Playbook />} />

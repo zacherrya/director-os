@@ -169,6 +169,9 @@ export interface Brand {
   name: string
   /** Jewellery, beauty, footwear — used later to suggest which brands to approach. */
   category: string
+  /** The brand's own colour as `#RRGGBB`. Identity only — it never stands in for
+   * deal health, which keeps its own colour on the pin's ring. Unset by default. */
+  color?: string
   website: string
   contactName: string
   contactEmail: string
@@ -189,6 +192,9 @@ export interface Opportunity {
   title: string
   /** What actually happens in it. */
   concept: string
+  /** One specific thing noticed about this brand — a campaign, a gap, a product.
+   * The PERSONAL line of the pitch, and the part that cannot be templated. */
+  brandObservation?: string
   /** Why this brand and this creator make sense together. */
   fit: string
   /** Why the audience would care, as opposed to why the brand would. */
@@ -203,6 +209,11 @@ export interface Opportunity {
   nextAction: string
   /** ISO date, no time — a deal chases on a day, not at an hour. */
   nextActionDate: string
+  /** Who this pitch is addressed to, and how. Set in Contact Nucleus and pinned
+   * to this opportunity so a pitch always carries its recipient. */
+  recipientContactId?: string
+  recipientChannel?: Channel
+  ccContactIds?: string[]
   /** Episodes standing as the deliverables. */
   episodeIds: string[]
   /** Which platforms it would go out on. Empty for UGC, which goes out on theirs. */

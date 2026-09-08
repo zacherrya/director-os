@@ -27,6 +27,10 @@ import {
   type Opportunity,
 } from '../../lib/partnerships'
 import { useEscapeKey } from '../../lib/useEscapeKey'
+import { BrandColorPicker } from './BrandColorPicker'
+import { PitchBuilder } from './PitchBuilder'
+import { ContactNucleus } from './ContactNucleus'
+import { contrastInk } from '../../lib/brandColor'
 import { Icon, Trash2, X } from '../Icon'
 
 const inputClass =
@@ -130,6 +134,11 @@ export function OpportunityPanel({
     setDraft('')
   }
 
+  // Two triggers — the monogram in the header and the swatch in the Brand colour
+  // section — so they need a flag each. Sharing one mounted both pickers at once.
+  const [headerColorOpen, setHeaderColorOpen] = useState(false)
+  const [sectionColorOpen, setSectionColorOpen] = useState(false)
+
   const channelState = (name: Channel) => channels.find((c) => c.channel === name)!
   const chanTone = (s: string) =>
     /Replied|Connected/.test(s) ? '#5f7d69' : s === 'Sent' ? '#5f7d69' : s === 'Bounced' ? '#a05f57' : '#8d908b'
@@ -144,8 +153,30 @@ export function OpportunityPanel({
       className="absolute right-0 top-0 z-30 flex h-full w-[428px] max-w-full shrink-0 flex-col overflow-hidden border-l border-[#E5E5E7] bg-white shadow-2xl"
     >
       <div className="flex shrink-0 items-start gap-3 border-b border-[#EDEDEF] px-5 py-4">
-        <div className="grid h-[38px] w-[38px] shrink-0 place-items-center rounded-lg border border-[#E5DFD1] bg-[#F5F3ED] text-[12px] font-semibold text-[#736F65]">
-          {monogram(brand?.name ?? '??')}
+        <div className="relative shrink-0">
+          <button
+            onClick={() => setHeaderColorOpen((v) => !v)}
+            title={brand?.color ? `Brand colour ${brand.color}` : 'Set a brand colour'}
+            aria-label={brand?.color ? `Brand colour ${brand.color}. Change it` : 'Set a brand colour'}
+            aria-expanded={headerColorOpen}
+            className="grid h-[38px] w-[38px] place-items-center rounded-lg border text-[12px] font-semibold transition hover:brightness-105"
+            style={
+              brand?.color
+                ? { backgroundColor: brand.color, borderColor: brand.color, color: contrastInk(brand.color) }
+                : { backgroundColor: '#F5F3ED', borderColor: '#E5DFD1', color: '#736F65' }
+            }
+          >
+            {monogram(brand?.name ?? '??')}
+          </button>
+          {headerColorOpen && brand && (
+            <div className="absolute left-0 top-[44px] z-40">
+              <BrandColorPicker
+                value={brand.color}
+                onChange={(hex) => updateBrand(brand.id, { color: hex })}
+                onClose={() => setHeaderColorOpen(false)}
+              />
+            </div>
+          )}
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[1.3px] text-[#8e9189]">
@@ -409,6 +440,28 @@ export function OpportunityPanel({
           </div>
         )}
 
+        {/* Strategy: the pitch formula reads straight off these. */}
+        <div className="mb-4">
+          <Eyebrow>What you noticed about them</Eyebrow>
+          <textarea
+            value={opportunity.brandObservation ?? ''}
+            onChange={(e) => patch({ brandObservation: e.target.value })}
+            rows={2}
+            placeholder="Their festive campaign was all heavy sets — nothing for everyday wear."
+            className={`${inputClass} mt-2 resize-none leading-relaxed`}
+          />
+        </div>
+        <div className="mb-4">
+          <Eyebrow>Why this brand fits</Eyebrow>
+          <textarea
+            value={opportunity.fit}
+            onChange={(e) => patch({ fit: e.target.value })}
+            rows={2}
+            placeholder="Beauty and styling, same audience."
+            className={`${inputClass} mt-2 resize-none leading-relaxed`}
+          />
+        </div>
+
         {/* Idea + concept + fee */}
         <div className="mb-4">
           <Eyebrow>The idea</Eyebrow>
@@ -464,6 +517,55 @@ export function OpportunityPanel({
               placeholder="₹25,000"
               className={`${inputClass} mt-2`}
             />
+          </div>
+        )}
+
+        <PitchBuilder opportunity={opportunity} brand={brand} />
+
+        <ContactNucleus opportunity={opportunity} brand={brand} />
+
+        {brand && (
+          <div className="mb-4 rounded-xl border border-[#EDEDEF] bg-[#FCFCFB] p-3.5">
+            <Eyebrow>Brand colour</Eyebrow>
+            <div className="relative mt-2 flex items-center gap-2.5">
+              <button
+                onClick={() => setSectionColorOpen((v) => !v)}
+                aria-expanded={sectionColorOpen}
+                className="h-8 w-8 shrink-0 rounded-md border transition hover:brightness-105"
+                style={
+                  brand.color
+                    ? { backgroundColor: brand.color, borderColor: brand.color }
+                    : {
+                        borderColor: '#E5DFD1',
+                        // A diagonal rule reads as "nothing set" without needing a label.
+                        backgroundImage:
+                          'linear-gradient(135deg, #F5F3ED 46%, #D6CFC0 46%, #D6CFC0 54%, #F5F3ED 54%)',
+                      }
+                }
+              />
+              <button
+                onClick={() => setSectionColorOpen((v) => !v)}
+                className="rounded-md bg-transparent p-0 text-left text-[12px] text-[#1C1C1E] hover:underline"
+              >
+                {brand.color ? (
+                  <span className="font-mono tracking-wide">{brand.color}</span>
+                ) : (
+                  <span className="text-[#8d908b]">Pick a colour for {brand.name}</span>
+                )}
+              </button>
+              {sectionColorOpen && (
+                <div className="absolute left-0 top-[38px] z-40">
+                  <BrandColorPicker
+                    value={brand.color}
+                    onChange={(hex) => updateBrand(brand.id, { color: hex })}
+                    onClose={() => setSectionColorOpen(false)}
+                  />
+                </div>
+              )}
+            </div>
+            <p className="mt-2 text-[11px] leading-relaxed text-[#8d908b]">
+              Marks this brand on the map and in the table. The ring around its pin still shows deal health.
+            </p>
           </div>
         )}
 

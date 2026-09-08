@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import { AnimatePresence } from 'framer-motion'
+import { useSearchParams } from 'react-router-dom'
 import { useAppStore } from '../store/appStore'
 import { NewOpportunityModal } from '../components/partnerships/NewOpportunityModal'
 import { OpportunityPanel } from '../components/partnerships/OpportunityPanel'
@@ -19,7 +20,21 @@ export function Partnerships() {
   const [tab, setTab] = useState<Tab>('pipeline')
   const [creating, setCreating] = useState(false)
   const [newBrandId, setNewBrandId] = useState<string | undefined>()
-  const [openId, setOpenId] = useState<string | null>(null)
+  // The open panel lives in the URL so that leaving for the Contact Nucleus and
+  // coming back lands on the same pitch rather than on a bare board.
+  const [params, setParams] = useSearchParams()
+  const openId = params.get('open')
+  const setOpenId = (id: string | null) => {
+    setParams(
+      (prev) => {
+        const next = new URLSearchParams(prev)
+        if (id) next.set('open', id)
+        else next.delete('open')
+        return next
+      },
+      { replace: true },
+    )
+  }
 
   const live = useMemo(() => opportunities.filter((o) => !o.deletedAt), [opportunities])
   const open = openId ? live.find((o) => o.id === openId) : undefined
