@@ -635,13 +635,18 @@ function tick(s: SceneState, clock: THREE.Clock) {
     s.nucleus.rotation.y += dt * 0.06
     const mat = s.core.material as THREE.MeshStandardMaterial
     mat.emissiveIntensity = 0.28 + Math.sin(e * 0.9) * 0.06
-    if (s.signalRun) {
+    // The pulse mesh is created lazily by signal(), so a run without one is not
+    // a state to animate through — it is a run to drop.
+    const pulse = s.signal
+    if (s.signalRun && pulse) {
       s.signalRun.t += dt * 0.85
-      if (s.signalRun.t >= 1) { s.signalRun = null; if (s.signal) s.signal.visible = false }
-      else {
-        s.signal.visible = true
-        s.signal.position.lerpVectors(s.signalRun.from, new THREE.Vector3(0, 0, 0), 1 - Math.pow(1 - s.signalRun.t, 2))
-        s.signal.scale.setScalar(1 + Math.sin(s.signalRun.t * Math.PI) * 0.7)
+      if (s.signalRun.t >= 1) {
+        s.signalRun = null
+        pulse.visible = false
+      } else {
+        pulse.visible = true
+        pulse.position.lerpVectors(s.signalRun.from, new THREE.Vector3(0, 0, 0), 1 - Math.pow(1 - s.signalRun.t, 2))
+        pulse.scale.setScalar(1 + Math.sin(s.signalRun.t * Math.PI) * 0.7)
       }
     }
   }
