@@ -1,3 +1,4 @@
+mod editor;
 mod files;
 mod oauth;
 mod instagram_upload;
@@ -8,6 +9,7 @@ pub fn run() {
   tauri::Builder::default()
     .plugin(tauri_plugin_http::init())
     .manage(oauth::OauthListener::default())
+    .manage(editor::ExportTarget::default())
     .invoke_handler(tauri::generate_handler![
       oauth::oauth_bind,
       oauth::oauth_bind_on,
@@ -17,6 +19,9 @@ pub fn run() {
       files::reveal_in_finder,
       files::path_exists,
       files::allow_video,
+      editor::pick_media,
+      editor::pick_export_path,
+      editor::write_export,
       youtube_upload::youtube_upload,
       instagram_upload::instagram_upload_binary
     ])

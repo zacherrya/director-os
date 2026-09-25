@@ -16,6 +16,7 @@ import { Analytics } from './pages/Analytics'
 import { Partnerships } from './pages/Partnerships'
 import { ContactNucleusPage } from './pages/ContactNucleusPage'
 import { Playbook } from './pages/Playbook'
+import { EditorView } from './pages/EditorView'
 import { onPersistFailure, useAppStore } from './store/appStore'
 import { toast } from './lib/toast'
 import { Toaster } from './components/Toaster'
@@ -108,6 +109,7 @@ function App() {
                 path="/projects/:projectId/episodes/:episodeId/storyboard"
                 element={<StoryboardView />}
               />
+              <Route path="/projects/:projectId/episodes/:episodeId/edit" element={<EditorView />} />
               <Route
                 path="/projects/:projectId/episodes/:episodeId/publish"
                 element={<PublishView />}

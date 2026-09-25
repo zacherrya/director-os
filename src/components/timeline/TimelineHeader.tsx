@@ -47,7 +47,8 @@ export function TimelineHeader({ project, episode }: { project: Project; episode
 
   const isStoryboard = location.pathname.endsWith('/storyboard')
   const isPublish = location.pathname.endsWith('/publish')
-  const isTimeline = !isStoryboard && !isPublish
+  const isEdit = location.pathname.endsWith('/edit')
+  const isTimeline = !isStoryboard && !isPublish && !isEdit
 
   useEffect(() => {
     if (!exportMenuOpen) return
@@ -168,6 +169,14 @@ export function TimelineHeader({ project, episode }: { project: Project; episode
               }`}
             >
               Storyboard
+            </button>
+            <button
+              onClick={() => navigate(`/projects/${project.id}/episodes/${episode.id}/edit`)}
+              className={`rounded-md px-3 py-1.5 text-[12.5px] font-medium transition ${
+                isEdit ? 'bg-elevated text-ink shadow-sm' : 'text-ink-dim hover:text-ink'
+              }`}
+            >
+              Edit
             </button>
             <button
               onClick={() => navigate(`/projects/${project.id}/episodes/${episode.id}/publish`)}
